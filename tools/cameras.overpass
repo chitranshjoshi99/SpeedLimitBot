@@ -1,0 +1,10 @@
+[out:json][timeout:600];
+(
+  node["highway"="speed_camera"](6.0,67.5,36.0,97.9);
+  node["enforcement"="maxspeed"](6.0,67.5,36.0,97.9);
+)->.cams;
+.cams out body;
+way(bn.cams)["highway"];
+out body;
+rel["type"="enforcement"]["enforcement"="maxspeed"](6.0,67.5,36.0,97.9);
+out body;

@@ -14,6 +14,9 @@ object Radar {
     var distanceM by mutableIntStateOf(-1)
     var over by mutableStateOf(false)
 
+    /** Set by the car screen, which is not Compose and has to be told to redraw. */
+    var onChange: (() -> Unit)? = null
+
     fun idle() {
         limitKmh = 0
         distanceM = -1

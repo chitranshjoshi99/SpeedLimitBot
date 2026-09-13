@@ -12,7 +12,8 @@ class AlertEngine {
 
     enum class Beep { NONE, SLOW, FAST }
 
-    class Out(val beep: Beep, val announceLimit: Int)
+    /** @param limitKmh 0 when the dataset has no limit for this camera. */
+    class Out(val beep: Beep, val announce: Boolean, val limitKmh: Int)
 
     private var armedId = -1
     private var announced = false
@@ -27,32 +28,32 @@ class AlertEngine {
      * @param id       camera identity; a change re-arms the announcement
      * @param distance metres to the camera
      * @param speedMps current ground speed
-     * @param limitKmh posted limit at that camera
-     * @return beep state plus the limit to speak (0 = say nothing)
+     * @param limitKmh posted limit at that camera, or 0 when the dataset does not know it
+     * @return beep state plus whether to speak now
      */
     fun update(id: Int, distance: Double, speedMps: Float, limitKmh: Int): Out {
         if (id != armedId) {
             armedId = id
             announced = false
         }
-        if (speedMps < MIN_MOVING_MPS) return Out(Beep.NONE, 0)
+        if (speedMps < MIN_MOVING_MPS) return Out(Beep.NONE, false, limitKmh)
 
         val eta = distance / speedMps
-        val over = speedMps * 3.6f > limitKmh + OVER_TOLERANCE_KMH
+        // An unknown limit cannot be exceeded — warn about the camera, stay quiet about speed.
+        val over = limitKmh > 0 && speedMps * 3.6f > limitKmh + OVER_TOLERANCE_KMH
 
-        var speak = 0
-        if (!announced && eta <= ANNOUNCE_S) {
-            announced = true
-            speak = limitKmh
-        }
+        val speak = !announced && eta <= ANNOUNCE_S
+        if (speak) announced = true
 
+        // Latched on `announced`, not on eta: a fix that nudges the estimate back over 60 s
+        // must not blink the beep off. Once a camera is announced it stays live until passed.
         val beep = when {
-            eta > ANNOUNCE_S -> Beep.NONE
+            !announced -> Beep.NONE
             over -> Beep.FAST
             eta <= CLOSE_S -> Beep.SLOW
             else -> Beep.NONE
         }
-        return Out(beep, speak)
+        return Out(beep, speak, limitKmh)
     }
 
     companion object {

@@ -20,6 +20,9 @@ import android.os.Looper
 import android.util.Log
 import android.speech.tts.TextToSpeech
 import androidx.car.app.connection.CarConnection
+import androidx.car.app.notification.CarAppExtender
+import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.ServiceCompat
 import androidx.lifecycle.Observer
 
@@ -119,21 +122,54 @@ class AlertService : android.app.Service(), LocationListener {
 
         Radar.limitKmh = hit.limitKmh
         Radar.distanceM = hit.distance.toInt()
-        Radar.over = Radar.speedKmh > hit.limitKmh + AlertEngine.OVER_TOLERANCE_KMH
+        Radar.over = hit.limitKmh > 0 && Radar.speedKmh > hit.limitKmh + AlertEngine.OVER_TOLERANCE_KMH
 
         val out = engine.update(hit.id, hit.distance, fix.speedMps, hit.limitKmh)
-        if (out.announceLimit > 0) speak(out.announceLimit)
+        if (out.announce) {
+            speak(out.limitKmh)
+            carAlert(out.limitKmh, hit.distance.toInt())
+        }
         setBeep(out.beep)
+        Radar.onChange?.invoke()
     }
 
     private fun standDown() {
         engine.clear()
         setBeep(AlertEngine.Beep.NONE)
         Radar.idle()
+        Radar.onChange?.invoke()
     }
 
+    /**
+     * The closest thing Android Auto has to an overlay: a navigation heads-up notification,
+     * which the car draws over whatever is on screen — Google Maps included. There is no
+     * floating-window API on the car display, so this is the whole mechanism.
+     */
+    private fun carAlert(limit: Int, metres: Int) {
+        if (!notificationsAllowed()) return
+        val note = NotificationCompat.Builder(this, App.CHANNEL_ALERT)
+            .setSmallIcon(android.R.drawable.ic_menu_compass)
+            .setContentTitle(if (limit > 0) "Speed camera · limit $limit" else "Speed camera ahead")
+            .setContentText("$metres m ahead")
+            .setCategory(NotificationCompat.CATEGORY_NAVIGATION)
+            .setOnlyAlertOnce(true)
+            .extend(
+                CarAppExtender.Builder()
+                    .setContentTitle(if (limit > 0) "Camera ahead · $limit" else "Camera ahead")
+                    .setContentText("$metres m")
+                    .setImportance(NotificationManagerCompat.IMPORTANCE_HIGH)
+                    .build()
+            )
+            .build()
+        NotificationManagerCompat.from(this).notify(ALERT_ID, note)
+    }
+
+    private fun notificationsAllowed() = Build.VERSION.SDK_INT < 33 ||
+        checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+
     private fun speak(limit: Int) {
-        val r = tts?.speak("Speed camera ahead. Limit $limit", TextToSpeech.QUEUE_FLUSH, null, "cam")
+        val words = if (limit > 0) "Speed camera ahead. Limit $limit" else "Speed camera ahead"
+        val r = tts?.speak(words, TextToSpeech.QUEUE_FLUSH, null, "cam")
         Log.i(TAG, "SPEAK limit=$limit dist=${Radar.distanceM} speed=${Radar.speedKmh} result=$r")
     }
 
@@ -179,6 +215,7 @@ class AlertService : android.app.Service(), LocationListener {
     companion object {
         private const val TAG = "Radar"
         private const val NOTE_ID = 1
+        private const val ALERT_ID = 2
         fun start(ctx: Context) {
             runCatching { ctx.startForegroundService(Intent(ctx, AlertService::class.java)) }
         }

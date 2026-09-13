@@ -1,6 +1,7 @@
 package com.speedlimitbot
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -10,15 +11,23 @@ class AlertEngineTest {
     /** 20 m/s = 72 km/h. */
     @Test fun announcesOnceAtOneMinute() {
         val e = AlertEngine()
-        assertEquals(0, e.update(1, 1400.0, 20f, 80).announceLimit)   // eta 70 s
-        assertEquals(80, e.update(1, 1100.0, 20f, 80).announceLimit)  // eta 55 s
-        assertEquals(0, e.update(1, 900.0, 20f, 80).announceLimit)    // already spoken
+        assertFalse(e.update(1, 1400.0, 20f, 80).announce)   // eta 70 s
+        assertTrue(e.update(1, 1100.0, 20f, 80).announce)    // eta 55 s
+        assertFalse(e.update(1, 900.0, 20f, 80).announce)    // already spoken
     }
 
     @Test fun slowBeepInsideTenSeconds() {
         val e = AlertEngine()
         assertEquals(AlertEngine.Beep.NONE, e.update(1, 1000.0, 20f, 80).beep)  // eta 50 s
         assertEquals(AlertEngine.Beep.SLOW, e.update(1, 180.0, 20f, 80).beep)   // eta 9 s
+    }
+
+    /** A jittery estimate crossing back over 60 s must not blink the beep off. */
+    @Test fun beepDoesNotFlapAtTheWindowEdge() {
+        val e = AlertEngine()
+        assertEquals(AlertEngine.Beep.FAST, e.update(1, 2000.0, 35f, 80).beep)   // eta 57 s
+        assertEquals(AlertEngine.Beep.FAST, e.update(1, 2217.0, 35f, 80).beep)   // eta 63 s
+        assertEquals(AlertEngine.Beep.FAST, e.update(1, 2100.0, 35f, 80).beep)
     }
 
     @Test fun fastBeepWhenOverLimit() {
@@ -33,8 +42,18 @@ class AlertEngineTest {
 
     @Test fun newCameraReArms() {
         val e = AlertEngine()
-        assertEquals(50, e.update(1, 500.0, 20f, 50).announceLimit)
-        assertEquals(60, e.update(2, 500.0, 20f, 60).announceLimit)
+        assertTrue(e.update(1, 500.0, 20f, 50).announce)
+        assertTrue(e.update(2, 500.0, 20f, 60).announce)
+    }
+
+    /** 81 of the 522 shipped cameras have no known limit; they must still warn. */
+    @Test fun unknownLimitWarnsButNeverCallsYouSpeeding() {
+        val e = AlertEngine()
+        val out = e.update(1, 1000.0, 40f, 0)   // 144 km/h past an unknown limit
+        assertTrue(out.announce)
+        assertEquals(0, out.limitKmh)
+        assertEquals(AlertEngine.Beep.NONE, out.beep)
+        assertEquals(AlertEngine.Beep.SLOW, e.update(1, 200.0, 40f, 0).beep)
     }
 
     @Test fun geoMathIsSane() {

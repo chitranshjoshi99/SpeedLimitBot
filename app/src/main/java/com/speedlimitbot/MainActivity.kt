@@ -178,7 +178,7 @@ private fun LimitSign(limit: Int, closeness: Float, over: Boolean, modifier: Mod
             )
         }
         BasicText(
-            limit.toString(),
+            if (limit > 0) limit.toString() else "?",   // the dataset does not know every limit
             style = TextStyle(color = Chalk, fontSize = 54.sp, fontWeight = FontWeight.Medium)
         )
     }
