@@ -136,3 +136,63 @@ class TrackSmoothingTest {
         assertTrue("speed jumped by $maxJump m/s between samples", maxJump < 8f)
     }
 }
+
+class CameraDbTest {
+
+    private val asset = sequenceOf(
+        "# comment",
+        "12.971599,77.594566,50,S",
+        "12.980000,77.600000,0,T",
+        "bad line",
+        "13.000000,77.700000,80"        // no kind column: treated as a speed camera
+    )
+
+    @Test fun parsesKindsAndTolerantOfJunk() {
+        val db = CameraDb.build(asset)
+        assertEquals(3, db.size)
+        val hit = db.nearestAhead(12.960000, 77.594566, 0f, 3000.0)!!
+        assertEquals(50, hit.limitKmh)
+        assertTrue(hit.speedCamera)
+    }
+
+    /** A download must be able to fill in a limit the bundled asset does not have. */
+    @Test fun downloadFillsGapsWithoutDuplicating() {
+        val downloaded = sequenceOf("12.980000,77.600000,60,S")
+        val db = CameraDb.build(asset, downloaded)
+        assertEquals(3, db.size)                       // same camera, not a second one
+        val hit = db.nearestAhead(12.970000, 77.600000, 0f, 1500.0)!!
+        assertEquals(60, hit.limitKmh)
+        assertTrue(hit.speedCamera)                    // upgraded from traffic camera
+    }
+
+    @Test fun downloadAddsNewCameras() {
+        val db = CameraDb.build(asset, sequenceOf("20.000000,75.000000,40,S"))
+        assertEquals(4, db.size)
+    }
+
+    @Test fun trafficCameraIsFlagged() {
+        val db = CameraDb.build(sequenceOf("12.980000,77.600000,0,T"))
+        assertFalse(db.nearestAhead(12.970000, 77.600000, 0f, 2000.0)!!.speedCamera)
+    }
+}
+
+class CameraDbKeyTest {
+
+    /** Two cameras 900 km apart in eastern India must stay two cameras. */
+    @Test fun distantCamerasInEasternIndiaDoNotCollide() {
+        val db = CameraDb.build(
+            sequenceOf(
+                "26.140000,91.770000,50,S",   // Guwahati
+                "22.570000,88.360000,50,S",   // Kolkata
+                "13.080000,80.270000,50,S"    // Chennai
+            )
+        )
+        assertEquals(3, db.size)
+    }
+
+    /** The same camera listed twice at metre precision is still one camera. */
+    @Test fun sameCameraTwiceIsOne() {
+        val db = CameraDb.build(sequenceOf("26.140000,91.770000,0,T", "26.140001,91.770000,50,S"))
+        assertEquals(1, db.size)
+    }
+}

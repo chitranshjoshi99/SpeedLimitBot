@@ -103,6 +103,9 @@ class AlertService : android.app.Service(), LocationListener {
 
     override fun onLocationChanged(loc: Location) {
         Radar.hasFix = true
+        // Refresh on any position at all — waiting for a valid heading would mean a phone
+        // sitting still in traffic never updates its map.
+        CameraSync.maybeRefresh(this, loc.latitude, loc.longitude)
 
         val fix = track.update(
             loc.latitude, loc.longitude, loc.time,
@@ -126,8 +129,8 @@ class AlertService : android.app.Service(), LocationListener {
 
         val out = engine.update(hit.id, hit.distance, fix.speedMps, hit.limitKmh)
         if (out.announce) {
-            speak(out.limitKmh)
-            carAlert(out.limitKmh, hit.distance.toInt())
+            speak(out.limitKmh, hit.speedCamera)
+            carAlert(out.limitKmh, hit.distance.toInt(), hit.speedCamera)
         }
         setBeep(out.beep)
         Radar.onChange?.invoke()
@@ -145,17 +148,18 @@ class AlertService : android.app.Service(), LocationListener {
      * which the car draws over whatever is on screen — Google Maps included. There is no
      * floating-window API on the car display, so this is the whole mechanism.
      */
-    private fun carAlert(limit: Int, metres: Int) {
+    private fun carAlert(limit: Int, metres: Int, speedCamera: Boolean) {
         if (!notificationsAllowed()) return
+        val what = if (speedCamera) "Speed camera" else "Traffic camera"
         val note = NotificationCompat.Builder(this, App.CHANNEL_ALERT)
             .setSmallIcon(android.R.drawable.ic_menu_compass)
-            .setContentTitle(if (limit > 0) "Speed camera · limit $limit" else "Speed camera ahead")
+            .setContentTitle(if (limit > 0) "$what · limit $limit" else "$what ahead")
             .setContentText("$metres m ahead")
             .setCategory(NotificationCompat.CATEGORY_NAVIGATION)
             .setOnlyAlertOnce(true)
             .extend(
                 CarAppExtender.Builder()
-                    .setContentTitle(if (limit > 0) "Camera ahead · $limit" else "Camera ahead")
+                    .setContentTitle(if (limit > 0) "$what · $limit" else "$what ahead")
                     .setContentText("$metres m")
                     .setImportance(NotificationManagerCompat.IMPORTANCE_HIGH)
                     .build()
@@ -167,10 +171,11 @@ class AlertService : android.app.Service(), LocationListener {
     private fun notificationsAllowed() = Build.VERSION.SDK_INT < 33 ||
         checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
 
-    private fun speak(limit: Int) {
-        val words = if (limit > 0) "Speed camera ahead. Limit $limit" else "Speed camera ahead"
+    private fun speak(limit: Int, speedCamera: Boolean) {
+        val what = if (speedCamera) "Speed camera ahead" else "Traffic camera ahead"
+        val words = if (limit > 0) "$what. Limit $limit" else what
         val r = tts?.speak(words, TextToSpeech.QUEUE_FLUSH, null, "cam")
-        Log.i(TAG, "SPEAK limit=$limit dist=${Radar.distanceM} speed=${Radar.speedKmh} result=$r")
+        Log.i(TAG, "SPEAK limit=$limit dist=${Radar.distanceM} speed=${Radar.speedKmh} speedCam=$speedCamera result=$r")
     }
 
     private fun setBeep(b: AlertEngine.Beep) {

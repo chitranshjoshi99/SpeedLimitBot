@@ -1,6 +1,10 @@
 #!/bin/bash
 # Rebuilds app/src/main/assets/cameras.csv from OpenStreetMap (ODbL).
 #
+# Collects both tagging schemes India actually uses: highway=speed_camera (explicit speed
+# cameras) and man_made=surveillance with a traffic zone or ALPR type (the enforcement and
+# monitoring cameras, which outnumber the former five to one). The kind column marks which.
+#
 # Cameras often carry no maxspeed of their own, so the limit is inherited from the road
 # the camera node sits on, then from any enforcement relation it belongs to. What is still
 # unknown is written as 0, which the app reads as "warn, but say no number".
@@ -17,6 +21,8 @@ query() {
 (
   node["highway"="speed_camera"]($BBOX);
   node["enforcement"="maxspeed"]($BBOX);
+  node["man_made"="surveillance"]["surveillance:zone"="traffic"]($BBOX);
+  node["man_made"="surveillance"]["surveillance:type"="ALPR"]($BBOX);
 )->.cams;
 .cams out body;
 way(bn.cams)["highway"];
@@ -50,6 +56,8 @@ def kmh(v):
     return int(m.group(1)) if m else 0
 
 limit = {i: kmh(n.get('tags', {}).get('maxspeed')) for i, n in nodes.items()}
+kind  = {i: ('S' if n.get('tags', {}).get('highway') == 'speed_camera' else 'T')
+         for i, n in nodes.items()}
 for w in ways:
     s = kmh(w.get('tags', {}).get('maxspeed'))
     if s:
@@ -61,11 +69,14 @@ for r in rels:
         for m in r.get('members', []):
             if m['type'] == 'node' and limit.get(m['ref']) == 0: limit[m['ref']] = s
 
-rows = sorted((round(n['lat'], 6), round(n['lon'], 6), limit[i]) for i, n in nodes.items())
+rows = sorted((round(n['lat'], 6), round(n['lon'], 6), limit[i], kind[i]) for i, n in nodes.items())
 with open(sys.argv[2], 'w') as f:
-    f.write('# OpenStreetMap speed cameras, ODbL. lat,lon,limit_kmh -- limit 0 = unknown.\n')
-    for la, lo, li in rows:
-        f.write('%.6f,%.6f,%d\n' % (la, lo, li))
-print('%d cameras, %d with a known limit' % (len(rows), sum(1 for r in rows if r[2])))
+    f.write('# OpenStreetMap traffic cameras, ODbL.\n')
+    f.write('# lat,lon,limit_kmh,kind -- limit 0 = unknown; kind S = speed camera, T = traffic camera.\n')
+    for la, lo, li, k in rows:
+        f.write('%.6f,%.6f,%d,%s\n' % (la, lo, li, k))
+print('%d cameras (%d speed, %d traffic), %d with a known limit'
+      % (len(rows), sum(1 for r in rows if r[3] == 'S'),
+         sum(1 for r in rows if r[3] == 'T'), sum(1 for r in rows if r[2])))
 PY
 rm -f "$raw"

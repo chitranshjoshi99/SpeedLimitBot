@@ -1,17 +1,22 @@
 package com.speedlimitbot
 
 import android.content.Context
+import java.io.File
 import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.sin
 import kotlin.math.sqrt
 
-/** Immutable speed-camera set, loaded once from assets/cameras.csv (lat,lon,limitKmh). */
+/**
+ * Immutable camera set: the bundled asset merged with whatever [CameraSync] has downloaded.
+ * Rebuilt off the main thread by [reload] whenever a sync lands.
+ */
 class CameraDb private constructor(
     private val lat: DoubleArray,
     private val lon: DoubleArray,
-    private val limit: IntArray
+    private val limit: IntArray,
+    private val speedCam: BooleanArray
 ) {
     val size get() = limit.size
 
@@ -26,8 +31,8 @@ class CameraDb private constructor(
         var best = -1
         var bestDist = maxMeters
 
-        // ponytail: linear scan with a bbox reject. ~50k rows at 1 Hz is sub-millisecond.
-        // Swap in a lat-banded index only if the dataset grows past a few hundred thousand.
+        // ponytail: linear scan with a bbox reject. Sub-millisecond into the tens of
+        // thousands of rows; a lat-banded index only pays off past a few hundred thousand.
         for (i in limit.indices) {
             if (abs(lat[i] - myLat) > dLatWin) continue
             if (abs(lon[i] - myLon) > dLonWin) continue
@@ -37,17 +42,17 @@ class CameraDb private constructor(
             best = i
             bestDist = d
         }
-        return if (best < 0) null else Hit(best, bestDist, limit[best])
+        return if (best < 0) null else Hit(best, bestDist, limit[best], speedCam[best])
     }
 
-    fun distanceTo(id: Int, myLat: Double, myLon: Double) = distance(myLat, myLon, lat[id], lon[id])
-
-    class Hit(val id: Int, val distance: Double, val limitKmh: Int)
+    /** @param speedCamera false for a traffic camera, which may not enforce speed at all. */
+    class Hit(val id: Int, val distance: Double, val limitKmh: Int, val speedCamera: Boolean)
 
     companion object {
         private const val M_PER_DEG = 111_320.0
         private const val AHEAD_CONE = 55f
         private const val EARTH_R = 6_371_000.0
+        const val CACHE = "cameras_downloaded.csv"
 
         @Volatile private var instance: CameraDb? = null
 
@@ -55,22 +60,59 @@ class CameraDb private constructor(
             instance ?: load(ctx).also { instance = it }
         }
 
+        /** Rebuilds from disk. Call off the main thread — it parses the whole set. */
+        fun reload(ctx: Context) {
+            val fresh = load(ctx)
+            synchronized(this) { instance = fresh }
+        }
+
         private fun load(ctx: Context): CameraDb {
-            val la = ArrayList<Double>(1024)
-            val lo = ArrayList<Double>(1024)
-            val li = ArrayList<Int>(1024)
-            runCatching {
-                ctx.assets.open("cameras.csv").bufferedReader().forEachLine { line ->
-                    if (line.isEmpty() || line[0] == '#') return@forEachLine
+            val asset = runCatching { ctx.assets.open("cameras.csv").bufferedReader().readLines() }
+                .getOrDefault(emptyList())
+            val cache = File(ctx.filesDir, CACHE)
+            val downloaded = if (!cache.exists()) emptyList()
+                else runCatching { cache.readLines() }.getOrDefault(emptyList())
+            return build(asset.asSequence(), downloaded.asSequence())
+        }
+
+        /** Pure builder: later sources add cameras and fill in gaps, never remove any. */
+        fun build(vararg sources: Sequence<String>): CameraDb {
+            // A camera present in both the asset and the download is one camera.
+            val seen = LinkedHashMap<Long, IntArray>(4096)
+            fun parse(lines: Sequence<String>) {
+                for (line in lines) {
+                    if (line.isEmpty() || line[0] == '#') continue
                     val p = line.split(',')
-                    if (p.size < 3) return@forEachLine
-                    val a = p[0].trim().toDoubleOrNull() ?: return@forEachLine
-                    val b = p[1].trim().toDoubleOrNull() ?: return@forEachLine
-                    val c = p[2].trim().toIntOrNull() ?: return@forEachLine
-                    la += a; lo += b; li += c
+                    if (p.size < 3) continue
+                    val la = p[0].trim().toDoubleOrNull() ?: continue
+                    val lo = p[1].trim().toDoubleOrNull() ?: continue
+                    val li = p[2].trim().toIntOrNull() ?: continue
+                    val speed = p.size < 4 || p[3].trim() != "T"
+                    // 1e5 is ~1 m, which is the same camera. Pack into separate halves of a
+                    // long: an xor of overlapping bits silently merges distinct cameras once
+                    // longitude passes 83.9 degrees, which is most of eastern India.
+                    val key = (Math.round(la * 1e5) shl 32) or (Math.round(lo * 1e5) and 0xFFFFFFFFL)
+                    val prev = seen[key]
+                    if (prev == null) {
+                        seen[key] = intArrayOf(
+                            Math.round(la * 1e6).toInt(), Math.round(lo * 1e6).toInt(),
+                            li, if (speed) 1 else 0
+                        )
+                    } else {
+                        if (prev[2] == 0 && li > 0) prev[2] = li      // a known limit beats none
+                        if (speed) prev[3] = 1                        // speed camera beats traffic
+                    }
                 }
             }
-            return CameraDb(la.toDoubleArray(), lo.toDoubleArray(), li.toIntArray())
+            sources.forEach(::parse)
+
+            val n = seen.size
+            val la = DoubleArray(n); val lo = DoubleArray(n)
+            val li = IntArray(n); val sc = BooleanArray(n)
+            seen.values.forEachIndexed { i, v ->
+                la[i] = v[0] / 1e6; lo[i] = v[1] / 1e6; li[i] = v[2]; sc[i] = v[3] == 1
+            }
+            return CameraDb(la, lo, li, sc)
         }
 
         /** Great-circle distance in metres (haversine). */
