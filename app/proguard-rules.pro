@@ -1,0 +1,3 @@
+-dontwarn org.jetbrains.annotations.**
+-repackageclasses
+-allowaccessmodification
