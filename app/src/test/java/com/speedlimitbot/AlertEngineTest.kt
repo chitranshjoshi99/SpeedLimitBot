@@ -196,3 +196,29 @@ class CameraDbKeyTest {
         assertEquals(1, db.size)
     }
 }
+
+class LimitOverrideMergeTest {
+
+    private val osm = sequenceOf(
+        "13.198438,77.698776,0,T",     // camera OSM has no limit for
+        "12.971599,77.594566,50,S"
+    )
+
+    /** What the driver picks must beat what the dataset says, and not add a camera. */
+    @Test fun driverLimitWinsAndDoesNotDuplicate() {
+        val user = sequenceOf("13.198438,77.698776,80,S")
+        val db = CameraDb.build(osm, user)
+        assertEquals(2, db.size)
+        val hit = db.nearestAhead(13.188438, 77.698776, 0f, 2000.0)!!
+        assertEquals(80, hit.limitKmh)
+        assertTrue(hit.speedCamera)
+    }
+
+    /** A later sync carrying no limit must not wipe the driver's answer. */
+    @Test fun syncWithoutLimitDoesNotClobberDriverLimit() {
+        val user = sequenceOf("13.198438,77.698776,80,S")
+        val laterSync = sequenceOf("13.198438,77.698776,0,T")
+        val db = CameraDb.build(osm, laterSync, user)
+        assertEquals(80, db.nearestAhead(13.188438, 77.698776, 0f, 2000.0)!!.limitKmh)
+    }
+}

@@ -1,6 +1,6 @@
 # SpeedLimitBot
 
-Offline speed-camera warner. Minimal UI, real Android Auto app. Release APK: **863 KB**.
+Offline speed-camera warner. Minimal UI, real Android Auto app. Release APK: **880 KB**.
 
 ## Behaviour
 
@@ -73,7 +73,7 @@ Needs JDK 17. The Gradle wrapper is checked in.
 JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home ./gradlew :app:assembleRelease
 ```
 
-Unit tests (alert state machine, track filtering, camera merging, geo math — 20 tests, no device):
+Unit tests (alert state machine, track filtering, camera merging, driver overrides, geo math — 22 tests, no device):
 
 ```bash
 JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home ./gradlew :app:test
@@ -120,6 +120,31 @@ the map, and `RadarCarAppService` resolves for
 hardware this machine does not have — the Desktop Head Unit needs the Android Auto app, which
 needs a Play Store system image, and `ACL_CONNECTED` is a protected broadcast `adb` cannot
 fake. Run `tools/dhu.md` steps on a Play-enabled device to close that gap.
+
+## Alerts and accessibility
+
+Everything audible plays as `USAGE_ASSISTANCE_NAVIGATION_GUIDANCE` and holds
+`AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK` for as long as a camera is live. Music ducks while the
+warning speaks or beeps and restores itself the moment focus is released — the restore is the
+system's job, so it survives the app being killed mid-alert. Beeps are synthesised through
+`AudioTrack` rather than `ToneGenerator`, because `ToneGenerator` only accepts a legacy stream
+type and cannot carry guidance attributes; its output would compete with the music instead of
+ducking it.
+
+The app plays its own beeps at full gain and **never touches the user's volume settings**.
+Raising the system media volume to force loudness would leave the car's stereo turned up after
+the drive, which is worse than the problem it solves. If guidance volume is low in the car, it
+is the car's guidance volume that needs raising.
+
+The whole window washes amber on approach and red when over the limit, pulsing, with the
+current UI when no camera is near — colour reads from a driving position at a glance where a
+number does not. The limit disc shows `?` when the dataset has no limit.
+
+After passing a camera with an unknown limit, five choices appear (50 / 70 / 80 / 100 / 120,
+plus skip). What the driver picks is stored in `cameras_user.csv` and merged last, so it beats
+both the bundled data and any later download, and it is used from the next pass onward. Fixed
+choices rather than a keyboard: text entry while driving is blocked by the car host and is a
+bad idea on the phone too.
 
 ## Android Auto
 

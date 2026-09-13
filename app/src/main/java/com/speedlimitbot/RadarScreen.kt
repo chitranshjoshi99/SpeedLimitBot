@@ -5,18 +5,25 @@ import androidx.car.app.Screen
 import androidx.car.app.model.Action
 import androidx.car.app.model.ActionStrip
 import androidx.car.app.model.CarColor
-import androidx.car.app.model.Pane
-import androidx.car.app.model.PaneTemplate
-import androidx.car.app.model.Row
 import androidx.car.app.model.Template
+import androidx.car.app.navigation.model.MessageInfo
+import androidx.car.app.navigation.model.NavigationTemplate
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 
 /**
- * The car screen: current speed and the camera ahead. Deliberately two rows — anything
- * more is reading material at 100 km/h.
+ * The car screen.
+ *
+ * NavigationTemplate rather than PaneTemplate for two reasons: it is the only template that
+ * colours the whole window, and the host treats its updates as refreshes rather than steps in
+ * a task, so it can be redrawn on every GPS fix without burning the five-template quota.
+ *
+ * Two lines of content, because the window this is meant to live in is the small one.
  */
 class RadarScreen(ctx: CarContext) : Screen(ctx), DefaultLifecycleObserver {
+
+    /** Flips on each redraw so the background pulses instead of sitting flat. */
+    private var phase = false
 
     init {
         lifecycle.addObserver(this)
@@ -31,45 +38,54 @@ class RadarScreen(ctx: CarContext) : Screen(ctx), DefaultLifecycleObserver {
     }
 
     override fun onGetTemplate(): Template {
-        val speed = Row.Builder()
-            .setTitle("${Radar.speedKmh} km/h")
-            .addText(
-                when {
-                    !Radar.hasFix -> "Acquiring GPS"
-                    Radar.over -> "Over the limit"
-                    else -> "Within the limit"
-                }
-            )
-            .build()
+        val armed = Radar.distanceM >= 0
+        phase = !phase
 
-        val camera = Row.Builder()
-            .setTitle(
-                when {
-                    Radar.distanceM < 0 -> "No camera ahead"
-                    Radar.limitKmh > 0 -> "Camera ahead · limit ${Radar.limitKmh}"
-                    else -> "Camera ahead"
-                }
-            )
-            .addText(if (Radar.distanceM < 0) "Clear road" else "${Radar.distanceM} m")
-            .build()
+        val title = when {
+            !Radar.running -> "Stopped"
+            !Radar.hasFix -> "Acquiring GPS"
+            !armed -> "${Radar.speedKmh} km/h"
+            Radar.limitKmh > 0 -> "${Radar.speedKmh} in ${Radar.limitKmh}"
+            else -> "${Radar.speedKmh} km/h"
+        }
+        val text = when {
+            !armed -> "No camera ahead"
+            Radar.distanceM >= 1000 -> "Camera %.1f km".format(Radar.distanceM / 1000f)
+            else -> "Camera ${Radar.distanceM} m"
+        }
 
-        return PaneTemplate.Builder(
-            Pane.Builder().addRow(speed).addRow(camera).build()
+        val builder = NavigationTemplate.Builder()
+            .setNavigationInfo(MessageInfo.Builder(title).setText(text).build())
+            .setActionStrip(actions(armed))
+
+        // Amber approaching, red over the limit; alternating with the default on each refresh
+        // makes it pulse. The host throttles redraws, so this is a slow flash by design.
+        if (armed && phase) {
+            builder.setBackgroundColor(if (Radar.over) CarColor.RED else CarColor.YELLOW)
+        }
+        return builder.build()
+    }
+
+    private fun actions(armed: Boolean): ActionStrip {
+        val strip = ActionStrip.Builder()
+        val unknown = Radar.pending
+        if (unknown != null && !armed) {
+            strip.addAction(
+                Action.Builder()
+                    .setTitle("Set limit")
+                    .setOnClickListener { screenManager.push(LimitPickerScreen(carContext, unknown)) }
+                    .build()
+            )
+        }
+        strip.addAction(
+            Action.Builder()
+                .setTitle(if (Radar.running) "Stop" else "Start")
+                .setOnClickListener {
+                    if (Radar.running) AlertService.stop(carContext) else AlertService.start(carContext)
+                    invalidate()
+                }
+                .build()
         )
-            .setTitle("SpeedLimitBot")
-            .setActionStrip(
-                ActionStrip.Builder().addAction(
-                    Action.Builder()
-                        .setTitle(if (Radar.running) "Stop" else "Start")
-                        .setBackgroundColor(if (Radar.over) CarColor.RED else CarColor.DEFAULT)
-                        .setOnClickListener {
-                            if (Radar.running) AlertService.stop(carContext)
-                            else AlertService.start(carContext)
-                            invalidate()
-                        }
-                        .build()
-                ).build()
-            )
-            .build()
+        return strip.build()
     }
 }

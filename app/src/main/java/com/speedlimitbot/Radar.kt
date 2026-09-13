@@ -17,6 +17,11 @@ object Radar {
     /** Set by the car screen, which is not Compose and has to be told to redraw. */
     var onChange: (() -> Unit)? = null
 
+    /** A camera just passed whose limit the dataset does not know, so the driver can fill it in. */
+    var pending by mutableStateOf<Unknown?>(null)
+
+    class Unknown(val lat: Double, val lon: Double, val speedCamera: Boolean)
+
     fun idle() {
         limitKmh = 0
         distanceM = -1

@@ -42,11 +42,19 @@ class CameraDb private constructor(
             best = i
             bestDist = d
         }
-        return if (best < 0) null else Hit(best, bestDist, limit[best], speedCam[best])
+        return if (best < 0) null else
+            Hit(best, bestDist, limit[best], speedCam[best], lat[best], lon[best])
     }
 
     /** @param speedCamera false for a traffic camera, which may not enforce speed at all. */
-    class Hit(val id: Int, val distance: Double, val limitKmh: Int, val speedCamera: Boolean)
+    class Hit(
+        val id: Int,
+        val distance: Double,
+        val limitKmh: Int,
+        val speedCamera: Boolean,
+        val lat: Double,
+        val lon: Double
+    )
 
     companion object {
         private const val M_PER_DEG = 111_320.0
@@ -69,10 +77,17 @@ class CameraDb private constructor(
         private fun load(ctx: Context): CameraDb {
             val asset = runCatching { ctx.assets.open("cameras.csv").bufferedReader().readLines() }
                 .getOrDefault(emptyList())
-            val cache = File(ctx.filesDir, CACHE)
-            val downloaded = if (!cache.exists()) emptyList()
-                else runCatching { cache.readLines() }.getOrDefault(emptyList())
-            return build(asset.asSequence(), downloaded.asSequence())
+            fun rows(name: String): List<String> {
+                val f = File(ctx.filesDir, name)
+                return if (!f.exists()) emptyList()
+                    else runCatching { f.readLines() }.getOrDefault(emptyList())
+            }
+            // Driver-entered limits come last so they win over anything downloaded.
+            return build(
+                asset.asSequence(),
+                rows(CACHE).asSequence(),
+                rows(LimitOverrides.FILE).asSequence()
+            )
         }
 
         /** Pure builder: later sources add cameras and fill in gaps, never remove any. */
@@ -99,7 +114,7 @@ class CameraDb private constructor(
                             li, if (speed) 1 else 0
                         )
                     } else {
-                        if (prev[2] == 0 && li > 0) prev[2] = li      // a known limit beats none
+                        if (li > 0) prev[2] = li                      // later sources correct earlier ones
                         if (speed) prev[3] = 1                        // speed camera beats traffic
                     }
                 }

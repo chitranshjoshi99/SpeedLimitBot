@@ -10,8 +10,6 @@ import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
 import android.media.AudioAttributes
-import android.media.AudioManager
-import android.media.ToneGenerator
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -35,24 +33,13 @@ class AlertService : android.app.Service(), LocationListener {
     private val engine = AlertEngine()
     private val handler = Handler(Looper.getMainLooper())
     private var tts: TextToSpeech? = null
-    private var tone: ToneGenerator? = null
+    private var audio: AlertAudio? = null
     private var beep = AlertEngine.Beep.NONE
     private val track = Track()
+    private var armed: CameraDb.Hit? = null
     private var carConnection: CarConnection? = null
     private var carObserver: Observer<Int>? = null
     private var sawCar = false
-
-    private val beeper = object : Runnable {
-        override fun run() {
-            val (dur, gap) = when (beep) {
-                AlertEngine.Beep.FAST -> 70 to 180
-                AlertEngine.Beep.SLOW -> 120 to 900
-                AlertEngine.Beep.NONE -> return
-            }
-            tone?.startTone(ToneGenerator.TONE_PROP_BEEP, dur)
-            handler.postDelayed(this, (dur + gap).toLong())
-        }
-    }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -62,7 +49,7 @@ class AlertService : android.app.Service(), LocationListener {
             this, NOTE_ID, notification("Waiting for GPS"),
             if (Build.VERSION.SDK_INT >= 29) android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION else 0
         )
-        tone = ToneGenerator(AudioManager.STREAM_MUSIC, 90)
+        audio = AlertAudio(this)
         tts = TextToSpeech(this) { st ->
             Log.i(TAG, "TTS init status=$st")
             if (st == TextToSpeech.SUCCESS) tts?.setAudioAttributes(
@@ -122,6 +109,7 @@ class AlertService : android.app.Service(), LocationListener {
         val hit = CameraDb.get(this)
             .nearestAhead(loc.latitude, loc.longitude, fix.heading, AlertEngine.RANGE_M)
         if (hit == null) { standDown(); return }
+        rememberIfUnknown(hit)
 
         Radar.limitKmh = hit.limitKmh
         Radar.distanceM = hit.distance.toInt()
@@ -136,7 +124,16 @@ class AlertService : android.app.Service(), LocationListener {
         Radar.onChange?.invoke()
     }
 
+    /** Passing a camera with no known limit is the moment worth asking the driver about it. */
+    private fun rememberIfUnknown(hit: CameraDb.Hit?) {
+        val was = armed
+        armed = hit
+        if (was == null || was.id == hit?.id) return
+        if (was.limitKmh == 0) Radar.pending = Radar.Unknown(was.lat, was.lon, was.speedCamera)
+    }
+
     private fun standDown() {
+        rememberIfUnknown(null)
         engine.clear()
         setBeep(AlertEngine.Beep.NONE)
         Radar.idle()
@@ -172,6 +169,8 @@ class AlertService : android.app.Service(), LocationListener {
         checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
 
     private fun speak(limit: Int, speedCamera: Boolean) {
+        // Duck the music for the announcement even when no beep is running yet.
+        audio?.takeFocus()
         val what = if (speedCamera) "Speed camera ahead" else "Traffic camera ahead"
         val words = if (limit > 0) "$what. Limit $limit" else what
         val r = tts?.speak(words, TextToSpeech.QUEUE_FLUSH, null, "cam")
@@ -182,8 +181,7 @@ class AlertService : android.app.Service(), LocationListener {
         if (b == beep) return
         beep = b
         Log.i(TAG, "BEEP $b dist=${Radar.distanceM} speed=${Radar.speedKmh} limit=${Radar.limitKmh}")
-        handler.removeCallbacks(beeper)
-        if (b != AlertEngine.Beep.NONE) handler.post(beeper)
+        audio?.setPattern(b)
     }
 
     private fun notification(text: String): Notification {
@@ -201,11 +199,10 @@ class AlertService : android.app.Service(), LocationListener {
     }
 
     override fun onDestroy() {
-        handler.removeCallbacks(beeper)
         runCatching { getSystemService(LocationManager::class.java).removeUpdates(this) }
         carObserver?.let { o -> carConnection?.type?.removeObserver(o) }
         tts?.shutdown()
-        tone?.release()
+        audio?.release()
         Radar.running = false
         Radar.hasFix = false
         Radar.idle()
@@ -214,7 +211,15 @@ class AlertService : android.app.Service(), LocationListener {
 
     // Pre-30 LocationListener stubs.
     override fun onProviderEnabled(provider: String) {}
-    override fun onProviderDisabled(provider: String) { stopSelf() }
+
+    /**
+     * A provider dropping is a tunnel or a momentary glitch, not a reason to quit: stopping here
+     * and being restarted by START_STICKY makes the service flap. Report no fix and wait.
+     */
+    override fun onProviderDisabled(provider: String) {
+        Radar.hasFix = false
+        standDown()
+    }
     @Deprecated("legacy") override fun onStatusChanged(p: String?, s: Int, e: Bundle?) {}
 
     companion object {

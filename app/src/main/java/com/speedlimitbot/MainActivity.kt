@@ -42,6 +42,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -54,6 +55,7 @@ private val Chalk = Color(0xFFF2F3F5)
 private val Dim = Color(0xFF6B7076)
 private val Danger = Color(0xFFFF3B30)
 private val Calm = Color(0xFF3ED598)
+private val Caution = Color(0xFFFFC300)
 
 class MainActivity : ComponentActivity() {
 
@@ -111,10 +113,27 @@ private fun Screen(onToggle: () -> Unit) {
         if (over) Danger else Chalk, tween(300), label = "speedColor"
     )
 
+    // The whole window washes amber on approach and red when speeding: at a glance, from a
+    // driving position, colour carries further than any number on the screen.
+    val wash by androidx.compose.animation.animateColorAsState(
+        when {
+            !armed -> Ink
+            over -> Danger
+            else -> Caution
+        },
+        tween(260), label = "wash"
+    )
+    val flash by rememberInfiniteTransition(label = "flash").animateFloat(
+        initialValue = 0f, targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(if (over) 340 else 700, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+        label = "flashAlpha"
+    )
+    val ground = if (!armed) Ink else lerp(Ink, wash, 0.34f + 0.46f * flash)
+
     Box(
         Modifier
             .fillMaxSize()
-            .background(Ink)
+            .background(ground)
             .clickable(remember { MutableInteractionSource() }, indication = null, onClick = onToggle),
         contentAlignment = Alignment.Center
     ) {
@@ -144,6 +163,12 @@ private fun Screen(onToggle: () -> Unit) {
             }
         }
 
+        LimitPicker(
+            Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = 96.dp)
+        )
+
         BasicText(
             when {
                 !Radar.running -> "TAP TO START"
@@ -157,9 +182,62 @@ private fun Screen(onToggle: () -> Unit) {
     }
 }
 
+/**
+ * Offered after passing a camera the dataset has no limit for. Five fixed choices, no keyboard:
+ * whatever the driver picks is saved for that camera and used from the next pass on.
+ */
+@Composable
+private fun LimitPicker(modifier: Modifier = Modifier) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val unknown = Radar.pending
+    AnimatedVisibility(
+        visible = unknown != null && Radar.distanceM < 0,
+        enter = fadeIn(tween(260)) + expandVertically(tween(260)),
+        exit = fadeOut(tween(200)) + shrinkVertically(tween(200)),
+        modifier = modifier
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            BasicText(
+                "LIMIT AT THAT CAMERA?",
+                style = TextStyle(color = Dim, fontSize = 11.sp, letterSpacing = 4.sp)
+            )
+            androidx.compose.foundation.layout.Spacer(Modifier.height(14.dp))
+            androidx.compose.foundation.layout.Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.padding(horizontal = 16.dp)
+            ) {
+                LimitOverrides.CHOICES.forEach { kmh ->
+                    Box(
+                        Modifier
+                            .size(52.dp)
+                            .background(Color(0xFF15181C), androidx.compose.foundation.shape.CircleShape)
+                            .clickable {
+                                unknown?.let {
+                                    LimitOverrides.save(ctx, it.lat, it.lon, kmh, it.speedCamera)
+                                    Radar.pending = null
+                                }
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        BasicText(kmh.toString(), style = TextStyle(color = Chalk, fontSize = 19.sp))
+                    }
+                }
+                Box(
+                    Modifier
+                        .size(52.dp)
+                        .clickable { Radar.pending = null },
+                    contentAlignment = Alignment.Center
+                ) {
+                    BasicText("skip", style = TextStyle(color = Dim, fontSize = 13.sp))
+                }
+            }
+        }
+    }
+}
+
 /** Speed-limit disc; the ring fills as the camera gets closer. */
 @Composable
-private fun LimitSign(limit: Int, closeness: Float, over: Boolean, modifier: Modifier = Modifier) {
+private fun LimitSign(limit: Int, closeness: Float, @Suppress("UNUSED_PARAMETER") over: Boolean, modifier: Modifier = Modifier) {
     Box(modifier.size(150.dp), contentAlignment = Alignment.Center) {
         androidx.compose.foundation.Canvas(Modifier.fillMaxSize()) {
             val stroke = size.minDimension * 0.085f
@@ -171,8 +249,10 @@ private fun LimitSign(limit: Int, closeness: Float, over: Boolean, modifier: Mod
                 topLeft = androidx.compose.ui.geometry.Offset(inset, inset), size = arcSize,
                 style = Stroke(width = stroke)
             )
+            // White, not amber or red: the window behind it already carries the urgency, and a
+            // coloured ring on its own colour disappears.
             drawArc(
-                color = if (over) Danger else Calm, startAngle = -90f, sweepAngle = 360f * closeness, useCenter = false,
+                color = Chalk, startAngle = -90f, sweepAngle = 360f * closeness, useCenter = false,
                 topLeft = androidx.compose.ui.geometry.Offset(inset, inset), size = arcSize,
                 style = Stroke(width = stroke, cap = androidx.compose.ui.graphics.StrokeCap.Round)
             )
