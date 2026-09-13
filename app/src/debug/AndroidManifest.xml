@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Debug only. CarAppActivity is the Android Automotive OS host for the same CarAppService that
+  Android Auto projection drives, so it renders the real templates in a real car UI without a
+  phone in the loop. No launcher category: this is started explicitly for testing, and shipping
+  it on Automotive would be a product flavour decision, not a debug one.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- app-automotive wants minSdk 29; the debug build only ever runs this on an API 35
+         Automotive image, and the release build does not include the library at all. -->
+    <uses-sdk tools:overrideLibrary="androidx.car.app.automotive" />
+
+    <application>
+        <activity
+            android:name="androidx.car.app.activity.CarAppActivity"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
+            <meta-data android:name="distractionOptimized" android:value="true" />
+        </activity>
+    </application>
+</manifest>

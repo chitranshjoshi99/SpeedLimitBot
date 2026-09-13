@@ -22,24 +22,41 @@ import androidx.lifecycle.LifecycleOwner
  */
 class RadarScreen(ctx: CarContext) : Screen(ctx), DefaultLifecycleObserver {
 
-    /** Flips on each redraw so the background pulses instead of sitting flat. */
-    private var phase = false
+    private val surface = RadarSurface(ctx)
+    private var picking = false
 
     init {
         lifecycle.addObserver(this)
     }
 
     override fun onStart(owner: LifecycleOwner) {
-        Radar.onChange = { invalidate() }
+        surface.attach()
+        picking = false
+        Radar.onChange = {
+            surface.onStateChanged()
+            offerLimitIfPending()
+            invalidate()
+        }
     }
 
     override fun onStop(owner: LifecycleOwner) {
         Radar.onChange = null
     }
 
+    /**
+     * Not every car host renders a NavigationTemplate action strip — the Automotive host does
+     * not — so the picker cannot depend on the driver finding a button. Present it directly
+     * once the camera is behind us and nothing else is being warned about.
+     */
+    private fun offerLimitIfPending() {
+        val unknown = Radar.pending ?: return
+        if (picking || Radar.distanceM >= 0) return
+        picking = true
+        screenManager.push(LimitPickerScreen(carContext, unknown))
+    }
+
     override fun onGetTemplate(): Template {
         val armed = Radar.distanceM >= 0
-        phase = !phase
 
         val title = when {
             !Radar.running -> "Stopped"
@@ -58,9 +75,8 @@ class RadarScreen(ctx: CarContext) : Screen(ctx), DefaultLifecycleObserver {
             .setNavigationInfo(MessageInfo.Builder(title).setText(text).build())
             .setActionStrip(actions(armed))
 
-        // Amber approaching, red over the limit; alternating with the default on each refresh
-        // makes it pulse. The host throttles redraws, so this is a slow flash by design.
-        if (armed && phase) {
+        // Tints the routing card only; the full-window wash is painted by RadarSurface.
+        if (armed) {
             builder.setBackgroundColor(if (Radar.over) CarColor.RED else CarColor.YELLOW)
         }
         return builder.build()

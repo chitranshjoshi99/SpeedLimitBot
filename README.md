@@ -94,6 +94,11 @@ adb logcat -s Radar:I -v time
 tools/drive.sh
 ```
 
+To run against a car instead of a phone, create an Automotive AVD from
+`system-images;android-35-ext15;android-automotive;arm64-v8a` and launch
+`com.speedlimitbot/androidx.car.app.activity.CarAppActivity`. That host activity comes from
+`app-automotive`, which is a debug-only dependency, so the release APK is unaffected.
+
 Last verified run:
 
 Driving past the real camera at 13.198438,77.698776 (limit 80, north of Bengaluru):
@@ -116,10 +121,30 @@ Verified on device alongside it: the car heads-up notification posts with
 the map, and `RadarCarAppService` resolves for
 `androidx.car.app.CarAppService` + `androidx.car.app.category.NAVIGATION`.
 
-**Not verified:** the Android Auto session itself and the Bluetooth auto-start. Both need
-hardware this machine does not have — the Desktop Head Unit needs the Android Auto app, which
-needs a Play Store system image, and `ACL_CONNECTED` is a protected broadcast `adb` cannot
-fake. Run `tools/dhu.md` steps on a Play-enabled device to close that gap.
+### Verified on a car host
+
+Run end to end on an Android Automotive OS emulator (`ro.build.characteristics=automotive`),
+which renders the same Car App Library templates that Android Auto projection drives:
+
+- Opening the car app starts the radar; closing the session stops it.
+- The whole window washes amber approaching a camera and red over the limit, and clears after.
+- The heads-up notification renders over the car UI: *"Speed camera · limit 80 — 707 m ahead"*.
+- Passing an unknown-limit camera presents the picker; choosing 80 wrote
+  `25.629454,85.104061,80,S` and the next pass announced `limit=80` with the over-limit beep.
+- `CameraSync` pulled 4751 cameras into the car's cache while driving.
+
+Two host differences that the code now accounts for. `NavigationTemplate.setBackgroundColor`
+tints only the routing card, not the window, so the full-window wash is painted onto the app's
+map surface through `SurfaceCallback`. And the Automotive host does not render the
+NavigationTemplate action strip at all, so the limit picker is presented directly rather than
+hidden behind a button the driver may never see.
+
+**Still not verified:** Android Auto *projection* specifically, and the Bluetooth auto-start.
+The Desktop Head Unit needs the Android Auto phone app, which needs a Play Store image and a
+Google sign-in, and `ACL_CONNECTED` is a protected broadcast `adb` cannot fake. The templates,
+service lifecycle, surface and notification are all shared with projection, so what remains
+untested there is the projection transport rather than the app's behaviour. See
+`tools/dhu.md`.
 
 ## Alerts and accessibility
 

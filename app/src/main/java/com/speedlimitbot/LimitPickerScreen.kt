@@ -28,6 +28,16 @@ class LimitPickerScreen(ctx: CarContext, private val camera: Radar.Unknown) : Sc
                     .build()
             )
         }
+        // Dismissing without choosing must clear the offer, or it reappears on the next fix.
+        list.addItem(
+            Row.Builder()
+                .setTitle("Skip")
+                .setOnClickListener {
+                    Radar.pending = null
+                    screenManager.pop()
+                }
+                .build()
+        )
         return ListTemplate.Builder()
             .setSingleList(list.build())
             .setTitle("Limit at that camera")

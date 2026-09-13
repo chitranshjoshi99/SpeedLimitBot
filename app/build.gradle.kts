@@ -58,6 +58,8 @@ dependencies {
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("androidx.car.app:app:1.7.0-beta02")
     debugImplementation("androidx.compose.ui:ui-tooling")
+    // Android Automotive OS host for the car templates; debug-only, so the release APK is untouched.
+    debugImplementation("androidx.car.app:app-automotive:1.7.0-beta02")
 }
 
 dependencies {
