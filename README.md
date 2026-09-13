@@ -2,6 +2,21 @@
 
 Offline speed-camera warner. Minimal UI, real Android Auto app. Release APK: **880 KB**.
 
+## Install
+
+Download **SpeedLimitBot-1.0.apk** from the
+[latest release](https://github.com/chitranshjoshi99/SpeedLimitBot/releases/latest) and open it
+on the phone. Android will ask you to allow installing from your browser or file manager the
+first time. Then, on first run:
+
+1. Grant location — choose **Allow all the time**.
+2. Allow notifications and Bluetooth.
+3. Accept the battery-optimisation prompt, or Bluetooth auto-start silently fails on Android 12+.
+
+The APK is signed with a self-signed key (SHA-256
+`3187c88b07b600d544fdc6050ac22854ca4127d9210b7fb1d0d0871dc6a02690`), so Play Protect will warn
+that it is from an unknown developer. That is expected for a sideloaded build.
+
 ## Behaviour
 
 | Trigger | Action |
