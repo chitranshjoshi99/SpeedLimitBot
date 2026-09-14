@@ -136,7 +136,8 @@ private fun Screen(onQuit: () -> Unit) {
     val armed = Radar.distanceM >= 0
     val over = Radar.over
 
-    val speed by animateFloatAsState(Radar.speedKmh.toFloat(), tween(420, easing = FastOutSlowInEasing), label = "speed")
+    // Short enough to feel live against the car's own speedometer.
+    val speed by animateFloatAsState(Radar.speedKmh.toFloat(), tween(160, easing = FastOutSlowInEasing), label = "speed")
     val closeness by animateFloatAsState(
         if (armed) (1f - Radar.distanceM / AlertEngine.RANGE_M.toFloat()).coerceIn(0f, 1f) else 0f,
         tween(900, easing = FastOutSlowInEasing), label = "closeness"

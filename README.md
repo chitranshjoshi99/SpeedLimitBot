@@ -96,6 +96,12 @@ Rebuild or retarget the bundle at another country with:
 tools/fetch_cameras.sh "south,west,north,east"
 ```
 
+Camera selection no longer depends on tags being present. Roughly 40% of India's
+`man_made=surveillance` nodes carry no `surveillance:zone` or `:type` at all, and filtering on
+those tags silently dropped whole neighbourhoods — a camera 1.3 km from a tester's house was
+invisible while RadarBot warned about it. Anything within 25 m of a real road now counts, which
+is better evidence than whether a mapper typed a tag, and still excludes building CCTV.
+
 ### Live updates
 
 `CameraSync` refreshes from Overpass while driving: a ~100 km box around the current position,

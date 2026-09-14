@@ -41,7 +41,16 @@ class Track {
         if (moved >= MIN_TRACK_M) {
             movedAt = timeMs
             heading = provBearing ?: CameraDb.bearing(prevLat, prevLon, lat, lon)
-            return Fix(smooth(provSpeed ?: (moved / dt).toFloat()), heading)
+            // A provider speed is a Doppler reading: instantaneous and already clean, so it is
+            // used as-is. Smoothing it was costing about two seconds of lag and reading low all
+            // the way up a ramp — 27 km/h while the car said 30. Only the derived fallback,
+            // which is an average over the interval and genuinely noisy, is filtered.
+            return if (provSpeed != null) {
+                smoothed = provSpeed
+                Fix(provSpeed, heading)
+            } else {
+                Fix(smooth((moved / dt).toFloat()), heading)
+            }
         }
 
         // Not moving: a stale or duplicate fix at first, a genuine stop once it persists.

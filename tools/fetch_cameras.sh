@@ -1,9 +1,13 @@
 #!/bin/bash
 # Rebuilds app/src/main/assets/cameras.csv from OpenStreetMap (ODbL).
 #
-# Collects both tagging schemes India actually uses: highway=speed_camera (explicit speed
-# cameras) and man_made=surveillance with a traffic zone or ALPR type (the enforcement and
-# monitoring cameras, which outnumber the former five to one). The kind column marks which.
+# Collects explicit speed cameras (highway=speed_camera, enforcement=maxspeed) plus any
+# man_made=surveillance node sitting within 25 m of a real road.
+#
+# The proximity test replaced a tag test that looked principled and was not: roughly 40% of
+# India's surveillance nodes carry no surveillance:zone or :type at all, so filtering on those
+# tags silently dropped whole neighbourhoods — including cameras people drive past daily.
+# Where a camera sits is better evidence than whether a mapper typed a tag.
 #
 # Cameras often carry no maxspeed of their own, so the limit is inherited from the road
 # the camera node sits on, then from any enforcement relation it belongs to. What is still
@@ -21,8 +25,12 @@ query() {
 (
   node["highway"="speed_camera"]($BBOX);
   node["enforcement"="maxspeed"]($BBOX);
-  node["man_made"="surveillance"]["surveillance:zone"="traffic"]($BBOX);
-  node["man_made"="surveillance"]["surveillance:type"="ALPR"]($BBOX);
+)->.explicit;
+way["highway"~"^(motorway|trunk|primary|secondary|tertiary)$"]($BBOX)->.roads;
+node["man_made"="surveillance"]["surveillance"!="indoor"]["surveillance:zone"!="building"]($BBOX)->.watch;
+(
+  .explicit;
+  node.watch(around.roads:25);
 )->.cams;
 .cams out body;
 way(bn.cams)["highway"];

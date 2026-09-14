@@ -3,6 +3,7 @@ package com.speedlimitbot
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
+import android.os.SystemClock
 import android.util.Log
 import java.io.File
 import java.net.HttpURLConnection
@@ -35,6 +36,7 @@ object CameraSync {
         "https://overpass.private.coffee/api/interpreter"
     )
 
+    private var lastOfflineLog = 0L
     private val busy = AtomicBoolean(false)
     private val pool = Executors.newSingleThreadExecutor { r -> Thread(r, "camera-sync") }
 
@@ -46,8 +48,15 @@ object CameraSync {
             p.getFloat("lat", 0f).toDouble(), p.getFloat("lon", 0f).toDouble(), lat, lon
         )
         if (!stale && moved < REFRESH_M) return
-        if (!online(ctx)) return
+        if (!online(ctx)) {
+            if (SystemClock.elapsedRealtime() - lastOfflineLog > 60_000L) {
+                lastOfflineLog = SystemClock.elapsedRealtime()
+                Log.i(TAG, "offline, keeping the cameras already on disk")
+            }
+            return
+        }
         if (!busy.compareAndSet(false, true)) return
+        Log.i(TAG, "refreshing around %.4f,%.4f".format(lat, lon))
         pool.execute {
             try {
                 refresh(ctx, lat, lon)
@@ -88,13 +97,20 @@ object CameraSync {
 
     private fun query(lat: Double, lon: Double): String {
         val bbox = "%.4f,%.4f,%.4f,%.4f".format(lat - SPAN_DEG, lon - SPAN_DEG, lat + SPAN_DEG, lon + SPAN_DEG)
+        // Most Indian surveillance nodes carry no zone or type tag at all — filtering on those
+        // missed roughly 40% of them, including whole neighbourhoods. Proximity to a real road
+        // is the honest test of whether a camera watches traffic, and it drops building CCTV.
         return """
-            [out:csv(::lat,::lon,"maxspeed","highway";false)][timeout:90];
+            [out:csv(::lat,::lon,"maxspeed","highway";false)][timeout:120];
+            way["highway"~"^(motorway|trunk|primary|secondary|tertiary)${'$'}"]($bbox)->.roads;
             (
               node["highway"="speed_camera"]($bbox);
               node["enforcement"="maxspeed"]($bbox);
-              node["man_made"="surveillance"]["surveillance:zone"="traffic"]($bbox);
-              node["man_made"="surveillance"]["surveillance:type"="ALPR"]($bbox);
+            )->.cams;
+            node["man_made"="surveillance"]["surveillance"!="indoor"]["surveillance:zone"!="building"]($bbox)->.watch;
+            (
+              .cams;
+              node.watch(around.roads:25);
             );
             out;
         """.trimIndent()

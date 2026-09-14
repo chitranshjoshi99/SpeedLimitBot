@@ -222,3 +222,29 @@ class LimitOverrideMergeTest {
         assertEquals(80, db.nearestAhead(13.188438, 77.698776, 0f, 2000.0)!!.limitKmh)
     }
 }
+
+class TrackSpeedResponseTest {
+
+    private fun lat(step: Int) = 12.971599 - step * 0.00013475   // 15 m per step
+
+    /** A Doppler speed from the provider must be reported as-is, not lagged by a filter. */
+    @Test fun providerSpeedIsNotSmoothed() {
+        val t = Track()
+        t.update(lat(6), 77.594566, 1000L, 5f, 0f)
+        t.update(lat(5), 77.594566, 2000L, 8f, 0f)
+        val f = t.update(lat(4), 77.594566, 3000L, 12f, 0f)!!
+        assertEquals(12f, f.speedMps, 0.01f)
+    }
+
+    /** Accelerating 0 to 30 km/h must read 30, not something short of it. */
+    @Test fun rampReachesItsTarget() {
+        val t = Track()
+        var time = 1000L
+        var last = 0f
+        listOf(2f, 4f, 6f, 8f, 8.33f, 8.33f).forEachIndexed { i, mps ->
+            time += 1000L
+            t.update(lat(6 - i), 77.594566, time, mps, 0f)?.let { last = it.speedMps }
+        }
+        assertEquals(30f, last * 3.6f, 0.5f)
+    }
+}
