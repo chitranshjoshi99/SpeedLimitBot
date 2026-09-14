@@ -59,7 +59,8 @@ object CameraSync {
         }
     }
 
-    private fun online(ctx: Context): Boolean {
+    /** Shared with [UpdateCheck]: neither should touch the network on a captive-portal Wi-Fi. */
+    internal fun online(ctx: Context): Boolean {
         val cm = ctx.getSystemService(ConnectivityManager::class.java) ?: return false
         val caps = cm.getNetworkCapabilities(cm.activeNetwork) ?: return false
         return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&

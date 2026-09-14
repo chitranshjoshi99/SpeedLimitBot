@@ -48,6 +48,7 @@ Two ways to get it into a real car:
 | Android Auto session starts | service auto-starts, car screen appears |
 | car Bluetooth connects (no Auto) | service auto-starts |
 | Auto session ends / Bluetooth disconnects | service stops |
+| a newer GitHub release exists | banner at the top of the screen, tap to open the release page |
 
 Thresholds live in `AlertEngine` (`ANNOUNCE_S`, `CLOSE_S`, `OVER_TOLERANCE_KMH`, `RANGE_M`).
 Only cameras inside a 55° cone ahead of the direction of travel count, so the opposite
@@ -114,6 +115,33 @@ Unit tests (alert state machine, track filtering, camera merging, driver overrid
 ```bash
 JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home ./gradlew :app:test
 ```
+
+### Releasing
+
+Publishing a release on GitHub runs `.github/workflows/release.yml`, which builds the signed
+APK and AAB at that tag and attaches them as `SpeedLimitBot-<version>.apk` and `.aab`. Bump
+`versionCode`/`versionName` in `app/build.gradle.kts` first — the workflow refuses to build a
+tag that disagrees with `versionName`, because the in-app update check compares the two.
+
+Four repository secrets carry the signing key, so it never touches the repo:
+
+| Secret | Value |
+|---|---|
+| `KEYSTORE_BASE64` | `base64 -i ~/.speedlimitbot/release.jks` |
+| `KEYSTORE_PASSWORD` | `storePassword` from `~/.speedlimitbot/keystore.properties` |
+| `KEY_ALIAS` | `keyAlias` from the same file |
+| `KEY_PASSWORD` | `keyPassword` from the same file |
+
+The build fails loudly if `KEYSTORE_BASE64` is missing rather than shipping an unsigned APK,
+and `apksigner verify --print-certs` prints the certificate SHA-256 in the log so it can be
+checked against the fingerprint above. `workflow_dispatch` rebuilds an existing tag.
+
+### Update check
+
+`UpdateCheck` asks the GitHub releases API for the latest tag at most once a day, only on a
+validated connection, and compares it to the installed `versionName` segment by segment (a
+string compare would rank 1.0.10 below 1.0.9). Nothing is downloaded or installed — a newer
+tag only lights the banner, which opens the release page. Every failure is silent.
 
 `local.properties` points at `~/Library/Android/sdk`. `gradle.properties` pins
 `org.gradle.java.home` to the Homebrew JDK 17 — change it if yours lives elsewhere.

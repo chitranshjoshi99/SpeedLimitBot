@@ -82,6 +82,7 @@ class MainActivity : ComponentActivity() {
         super.onStart()
         // Opening the app means the driver wants it watching. Nothing to tap.
         if (!Radar.running && hasLocation()) AlertService.start(this)
+        UpdateCheck.maybeCheck(this)
     }
 
     private fun hasLocation() =
@@ -200,6 +201,12 @@ private fun Screen(onQuit: () -> Unit) {
                 .padding(bottom = 96.dp)
         )
 
+        UpdateBanner(
+            Modifier
+                .align(Alignment.TopCenter)
+                .padding(top = 44.dp)
+        )
+
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 40.dp)
@@ -228,6 +235,34 @@ private fun Screen(onQuit: () -> Unit) {
                     .padding(horizontal = 28.dp, vertical = 10.dp)
             )
         }
+    }
+}
+
+/**
+ * Sideloaded builds never get a Play update prompt, so a newer GitHub release says so here.
+ * Tapping opens the release page — the driver installs it when parked, not mid-drive.
+ */
+@Composable
+private fun UpdateBanner(modifier: Modifier = Modifier) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val release = UpdateCheck.available
+    AnimatedVisibility(
+        visible = release != null,
+        enter = fadeIn(tween(400)),
+        exit = fadeOut(tween(200)),
+        modifier = modifier
+    ) {
+        BasicText(
+            "UPDATE ${release?.version.orEmpty()} AVAILABLE",
+            style = TextStyle(color = Caution, fontSize = 11.sp, letterSpacing = 4.sp),
+            modifier = Modifier
+                .clickable(remember { MutableInteractionSource() }, indication = null) {
+                    release?.let {
+                        runCatching { ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(it.url))) }
+                    }
+                }
+                .padding(horizontal = 24.dp, vertical = 10.dp)
+        )
     }
 }
 
