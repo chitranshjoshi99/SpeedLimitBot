@@ -28,11 +28,14 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -187,10 +190,17 @@ private fun Screen(onQuit: () -> Unit, onExport: () -> Unit) {
     )
     val ground = if (!armed) Ink else lerp(Ink, wash, 0.34f + 0.46f * flash)
 
+    // The wash paints the whole window, system bars included — that is the point of it. What
+    // has to be readable sits inside, clear of the bars.
     Box(
         Modifier
             .fillMaxSize()
-            .background(ground),
+            .background(ground)
+    ) {
+      Box(
+        Modifier
+            .fillMaxSize()
+            .windowInsetsPadding(WindowInsets.safeDrawing),
         contentAlignment = Alignment.Center
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -228,7 +238,7 @@ private fun Screen(onQuit: () -> Unit, onExport: () -> Unit) {
         UpdateBanner(
             Modifier
                 .align(Alignment.TopCenter)
-                .padding(top = 44.dp)
+                .padding(top = HeaderHeight)
         )
 
         Column(
@@ -259,6 +269,7 @@ private fun Screen(onQuit: () -> Unit, onExport: () -> Unit) {
                     .padding(horizontal = 28.dp, vertical = 10.dp)
             )
         }
+      }
 
         Menu(onExport)
     }

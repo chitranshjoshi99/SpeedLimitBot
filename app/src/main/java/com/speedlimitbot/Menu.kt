@@ -13,10 +13,13 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
@@ -56,26 +59,8 @@ fun Menu(onExport: () -> Unit) {
 
     Box(Modifier.fillMaxSize()) {
 
-        Box(
-            Modifier
-                .align(Alignment.TopStart)
-                .padding(8.dp)
-                .size(48.dp)
-                .clickable(remember { MutableInteractionSource() }, indication = null) { open = !open },
-            contentAlignment = Alignment.Center
-        ) {
-            Canvas(Modifier.size(22.dp)) {
-                val stroke = size.height * 0.1f
-                listOf(0.2f, 0.5f, 0.8f).forEach { f ->
-                    drawLine(
-                        Dim, Offset(0f, size.height * f), Offset(size.width, size.height * f),
-                        strokeWidth = stroke, cap = StrokeCap.Round
-                    )
-                }
-            }
-        }
-
-        // Tapping anywhere else closes the panel, so no item needs its own dismiss.
+        // Tapping anywhere else closes the panel, so no item needs its own dismiss. Drawn first
+        // and edge to edge, so it dims under the status bar too.
         if (open) {
             Box(
                 Modifier
@@ -85,53 +70,86 @@ fun Menu(onExport: () -> Unit) {
             )
         }
 
-        AnimatedVisibility(
-            visible = open,
-            // Fade only: a panel that is still growing moves its own rows out from under the
-            // finger, and the tap lands on the scrim behind it instead.
-            enter = fadeIn(tween(180)),
-            exit = fadeOut(tween(140)),
-            modifier = Modifier
+        // The header owns the top of the window. Without the status-bar inset the icon sits
+        // where the system draws the clock and the battery, not where we draw.
+        Column(
+            Modifier
                 .align(Alignment.TopStart)
-                .padding(start = 16.dp, top = 64.dp, end = 16.dp)
+                .windowInsetsPadding(WindowInsets.statusBars)
         ) {
-            Column(
+            Box(
                 Modifier
-                    .background(Color(0xFF15181C), RoundedCornerShape(14.dp))
-                    .padding(vertical = 8.dp)
+                    .padding(horizontal = 4.dp)
+                    .size(HeaderHeight)
+                    .clickable(remember { MutableInteractionSource() }, indication = null) { open = !open },
+                contentAlignment = Alignment.Center
             ) {
-                Item("CHECK FOR UPDATES") {
-                    open = false
-                    say("Checking…")
-                    UpdateCheck.check(ctx, ::say)
+                Canvas(Modifier.size(22.dp)) {
+                    val stroke = size.height * 0.1f
+                    listOf(0.2f, 0.5f, 0.8f).forEach { f ->
+                        drawLine(
+                            Dim, Offset(0f, size.height * f), Offset(size.width, size.height * f),
+                            strokeWidth = stroke, cap = StrokeCap.Round
+                        )
+                    }
                 }
-                Item("REFRESH CAMERA DATA") {
-                    open = false
-                    say("Refreshing…")
-                    CameraSync.refreshNow(ctx, ::say)
-                }
-                Item("ADD CAMERA HERE") {
-                    open = false
-                    adding = true
-                }
-                Item("DOWNLOAD MY CAMERAS") {
-                    open = false
-                    val f = File(ctx.filesDir, LimitOverrides.FILE)
-                    if (!f.exists() || f.length() == 0L) say("No cameras added yet") else onExport()
+            }
+
+            AnimatedVisibility(
+                visible = open,
+                // Fade only: a panel that is still growing moves its own rows out from under the
+                // finger, and the tap lands on the scrim behind it instead.
+                enter = fadeIn(tween(180)),
+                exit = fadeOut(tween(140)),
+                modifier = Modifier.padding(start = 12.dp, end = 16.dp)
+            ) {
+                Column(
+                    Modifier
+                        .background(Color(0xFF15181C), RoundedCornerShape(14.dp))
+                        .padding(vertical = 8.dp)
+                ) {
+                    Item("CHECK FOR UPDATES") {
+                        open = false
+                        say("Checking…")
+                        UpdateCheck.check(ctx, ::say)
+                    }
+                    Item("REFRESH CAMERA DATA") {
+                        open = false
+                        say("Refreshing…")
+                        CameraSync.refreshNow(ctx, ::say)
+                    }
+                    Item("ADD CAMERA HERE") {
+                        open = false
+                        adding = true
+                    }
+                    Item("DOWNLOAD MY CAMERAS") {
+                        open = false
+                        val f = File(ctx.filesDir, LimitOverrides.FILE)
+                        if (!f.exists() || f.length() == 0L) say("No cameras added yet") else onExport()
+                    }
                 }
             }
         }
 
         AddCamera(visible = adding, onDone = { adding = false }, say = ::say)
 
-        // Last, so the answer to a tap is readable over the panel and the add sheet alike.
-        Say.Line(
+        // Last, so the answer to a tap is readable over the panel and the add sheet alike. It
+        // shares the header's row, beside the icon rather than under the status bar.
+        Box(
             Modifier
                 .align(Alignment.TopCenter)
-                .padding(top = 18.dp)
-        )
+                .windowInsetsPadding(WindowInsets.statusBars)
+                .height(HeaderHeight)
+                .padding(horizontal = 64.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Say.Line()
+        }
     }
 }
+
+/** Height of the header row the hamburger and the status line sit in. */
+val HeaderHeight = 56.dp
 
 /**
  * What a menu action has to say back. A Toast would be the obvious choice and is the wrong one:
