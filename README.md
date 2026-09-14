@@ -245,6 +245,23 @@ both the bundled data and any later download, and it is used from the next pass 
 choices rather than a keyboard: text entry while driving is blocked by the car host and is a
 bad idea on the phone too.
 
+## Android Auto: warnings as messages
+
+A sideloaded Car App Library app does not get its templates rendered in a real car, but the
+app still appears in the car's app list as a **notification app**, and that surface does work.
+So the warning is mirrored there as a messaging conversation: the sender's avatar is the
+warning light — amber approaching, red over the limit — the message text counts down the
+distance, and passing the camera cancels the conversation, which is what puts the screen back
+to "no new messages".
+
+Alerting posts happen on state changes only: first warning, and crossing into over-the-limit.
+Posting once per beep was asked for and deliberately not built. The car reads the sender name
+aloud for each message, so it would talk over the spoken warning; the notification manager
+rate-limits a package posting in a tight loop, so the extra posts get dropped rather than
+shown; and a list growing several times a second is the reading-while-driving that the car's
+own rules exist to prevent. Between state changes the same notification is updated silently,
+so the distance still counts down without a fresh alert each time.
+
 ## Android Auto
 
 The app is a Car App Library app in the `androidx.car.app.category.NAVIGATION` category.

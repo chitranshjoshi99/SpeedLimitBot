@@ -52,6 +52,7 @@ class AlertService : android.app.Service(), LocationListener {
         }
     }
     private var armed: CameraDb.Hit? = null
+    private var messagedOver = false
     private var carConnection: CarConnection? = null
     private var carObserver: Observer<Int>? = null
     private var sawCar = false
@@ -69,6 +70,7 @@ class AlertService : android.app.Service(), LocationListener {
             if (Build.VERSION.SDK_INT >= 33) Context.RECEIVER_NOT_EXPORTED else 0
         )
         audio = AlertAudio(this)
+        CarMessage.register(this)
         tts = TextToSpeech(this) { st ->
             Log.i(TAG, "TTS init status=$st")
             if (st == TextToSpeech.SUCCESS) tts?.setAudioAttributes(
@@ -191,6 +193,7 @@ class AlertService : android.app.Service(), LocationListener {
             speak(out.limitKmh, hit.speedCamera)
             carAlert(out.limitKmh, hit.distance.toInt(), hit.speedCamera)
         }
+        carMessage(hit, out.announce)
         setBeep(out.beep)
         updateNotification()
         Radar.onChange?.invoke()
@@ -201,10 +204,33 @@ class AlertService : android.app.Service(), LocationListener {
         val was = armed
         armed = hit
         if (was == null || was.id == hit?.id) return
+        messagedOver = false          // a different camera starts a fresh warning
         if (was.limitKmh == 0) Radar.pending = Radar.Unknown(was.lat, was.lon, was.speedCamera)
     }
 
+    /**
+     * The car's messaging list is the only screen a sideloaded app gets, so the current warning
+     * is mirrored there. Only a change of state alerts; the distance countdown updates quietly.
+     */
+    private fun carMessage(hit: CameraDb.Hit, announced: Boolean) {
+        val what = if (hit.speedCamera) "Speed camera" else "Traffic camera"
+        val title = if (Radar.over) "$what · slow down" else what
+        val body = buildString {
+            append("${hit.distance.toInt()} m ahead")
+            if (hit.limitKmh > 0) append(" · limit ${hit.limitKmh}")
+            if (Radar.over) append(" · you are at ${Radar.speedKmh}")
+        }
+        // Crossing into over-the-limit is news; creeping 10 m closer is not.
+        val alert = announced || Radar.over != messagedOver
+        messagedOver = Radar.over
+        CarMessage.show(this, title, body, Radar.over, alert)
+    }
+
     private fun standDown() {
+        if (armed != null) {
+            messagedOver = false
+            CarMessage.clear(this)
+        }
         rememberIfUnknown(null)
         engine.clear()
         setBeep(AlertEngine.Beep.NONE)
@@ -227,6 +253,10 @@ class AlertService : android.app.Service(), LocationListener {
             .setContentText("$metres m ahead")
             .setCategory(NotificationCompat.CATEGORY_NAVIGATION)
             .setOnlyAlertOnce(true)
+            // Silent on the phone so it does not heads-up alongside the messaging alert for the
+            // same camera. The car's own importance comes from CarAppExtender below, so hosts
+            // that render navigation notifications still show it.
+            .setSilent(true)
             .extend(
                 CarAppExtender.Builder()
                     .setContentTitle(if (limit > 0) "$what · $limit" else "$what ahead")
@@ -293,6 +323,7 @@ class AlertService : android.app.Service(), LocationListener {
 
     override fun onDestroy() {
         runCatching { unregisterReceiver(quitReceiver) }
+        CarMessage.unregister(this)
         runCatching { getSystemService(LocationManager::class.java).removeUpdates(this) }
         carObserver?.let { o -> carConnection?.type?.removeObserver(o) }
         tts?.shutdown()
