@@ -1,6 +1,7 @@
 package com.speedlimitbot
 
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableDoubleStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -13,6 +14,10 @@ object Radar {
     var limitKmh by mutableIntStateOf(0)
     var distanceM by mutableIntStateOf(-1)
     var over by mutableStateOf(false)
+
+    /** Last known position. NaN until the first fix; the menu needs it to place a new camera. */
+    var lat by mutableDoubleStateOf(Double.NaN)
+    var lon by mutableDoubleStateOf(Double.NaN)
 
     /** Set by the car screen, which is not Compose and has to be told to redraw. */
     var onChange: (() -> Unit)? = null

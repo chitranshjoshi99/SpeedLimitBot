@@ -34,31 +34,46 @@ object UpdateCheck {
 
     class Release(val version: String, val url: String)
 
+    /** Background check on app open: at most one a day, and it says nothing when it fails. */
     fun maybeCheck(ctx: Context) {
         if (available != null) return
         val p = ctx.getSharedPreferences(PREF, Context.MODE_PRIVATE)
         if (System.currentTimeMillis() - p.getLong("at", 0L) < EVERY_MS) return
-        if (!CameraSync.online(ctx)) return
-        if (!busy.compareAndSet(false, true)) return
+        check(ctx) {}
+    }
+
+    /**
+     * The same check, asked for from the menu: no daily throttle, and [done] is always called on
+     * the main thread with something to show the person who tapped.
+     */
+    fun check(ctx: Context, done: (String) -> Unit) {
+        if (!CameraSync.online(ctx)) { done("No internet"); return }
+        if (!busy.compareAndSet(false, true)) { done("Already checking"); return }
         val app = ctx.applicationContext
         pool.execute {
+            var msg = "Update check failed"
             try {
                 val json = JSONObject(get(LATEST))
-                p.edit().putLong("at", System.currentTimeMillis()).apply()
+                app.getSharedPreferences(PREF, Context.MODE_PRIVATE).edit()
+                    .putLong("at", System.currentTimeMillis()).apply()
                 val tag = json.optString("tag_name")
-                val here = app.packageManager.getPackageInfo(app.packageName, 0).versionName
-                    ?: return@execute
-                if (!newer(tag, here)) return@execute
-                val url = json.optString("html_url").ifEmpty { return@execute }
-                Log.i(TAG, "update $tag available, running $here")
-                Handler(Looper.getMainLooper()).post {
-                    available = Release(tag.trimStart('v', 'V'), url)
+                val here = app.packageManager.getPackageInfo(app.packageName, 0).versionName ?: "0"
+                val url = json.optString("html_url")
+                msg = if (newer(tag, here) && url.isNotEmpty()) {
+                    Log.i(TAG, "update $tag available, running $here")
+                    Handler(Looper.getMainLooper()).post {
+                        available = Release(tag.trimStart('v', 'V'), url)
+                    }
+                    "Update $tag available"
+                } else {
+                    "Up to date — v$here"
                 }
             } catch (e: Exception) {
                 Log.i(TAG, "update check failed: $e")
             } finally {
                 busy.set(false)
             }
+            Handler(Looper.getMainLooper()).post { done(msg) }
         }
     }
 

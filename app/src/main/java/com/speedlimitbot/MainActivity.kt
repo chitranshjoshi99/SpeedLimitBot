@@ -50,12 +50,12 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-private val Ink = Color(0xFF07080A)
-private val Chalk = Color(0xFFF2F3F5)
-private val Dim = Color(0xFF6B7076)
-private val Danger = Color(0xFFFF3B30)
-private val Calm = Color(0xFF3ED598)
-private val Caution = Color(0xFFFFC300)
+internal val Ink = Color(0xFF07080A)
+internal val Chalk = Color(0xFFF2F3F5)
+internal val Dim = Color(0xFF6B7076)
+internal val Danger = Color(0xFFFF3B30)
+internal val Calm = Color(0xFF3ED598)
+internal val Caution = Color(0xFFFFC300)
 
 class MainActivity : ComponentActivity() {
 
@@ -68,13 +68,32 @@ class MainActivity : ComponentActivity() {
         ActivityResultContracts.RequestMultiplePermissions()
     ) { askPermissions() }
 
+    /**
+     * Hands the driver-entered cameras to wherever they want them. The system picker means no
+     * storage permission and no guessing at a Downloads path.
+     */
+    private val exportCsv = registerForActivityResult(
+        ActivityResultContracts.CreateDocument("text/comma-separated-values")
+    ) { uri ->
+        if (uri == null) return@registerForActivityResult
+        val ok = runCatching {
+            contentResolver.openOutputStream(uri)?.use { out ->
+                out.write(java.io.File(filesDir, LimitOverrides.FILE).readBytes())
+            } ?: error("no stream")
+        }.isSuccess
+        Say.text = if (ok) "Saved" else "Could not save"
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         askPermissions()
         setContent {
-            Screen(onQuit = {
-                if (Radar.running) AlertService.stop(this) else AlertService.start(this)
-            })
+            Screen(
+                onQuit = {
+                    if (Radar.running) AlertService.stop(this) else AlertService.start(this)
+                },
+                onExport = { exportCsv.launch("speedlimitbot_my_cameras.csv") }
+            )
         }
     }
 
@@ -132,7 +151,7 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-private fun Screen(onQuit: () -> Unit) {
+private fun Screen(onQuit: () -> Unit, onExport: () -> Unit) {
     val armed = Radar.distanceM >= 0
     val over = Radar.over
 
@@ -240,6 +259,8 @@ private fun Screen(onQuit: () -> Unit) {
                     .padding(horizontal = 28.dp, vertical = 10.dp)
             )
         }
+
+        Menu(onExport)
     }
 }
 

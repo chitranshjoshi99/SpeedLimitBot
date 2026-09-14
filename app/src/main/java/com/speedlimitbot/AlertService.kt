@@ -163,6 +163,8 @@ class AlertService : android.app.Service(), LocationListener {
         bestAt = now
 
         Radar.hasFix = true
+        Radar.lat = loc.latitude
+        Radar.lon = loc.longitude
         // Refresh on any position at all — waiting for a valid heading would mean a phone
         // sitting still in traffic never updates its map.
         CameraSync.maybeRefresh(this, loc.latitude, loc.longitude)

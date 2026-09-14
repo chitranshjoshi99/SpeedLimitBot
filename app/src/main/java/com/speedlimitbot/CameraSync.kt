@@ -68,6 +68,30 @@ object CameraSync {
         }
     }
 
+    /**
+     * The same download asked for from the menu: no distance or age throttle, because someone
+     * tapped. [done] always runs on the main thread with something worth showing them.
+     */
+    fun refreshNow(ctx: Context, done: (String) -> Unit) {
+        val lat = Radar.lat
+        val lon = Radar.lon
+        if (lat.isNaN()) { done("No GPS fix yet"); return }
+        if (!online(ctx)) { done("No internet"); return }
+        if (!busy.compareAndSet(false, true)) { done("Already refreshing"); return }
+        val app = ctx.applicationContext
+        pool.execute {
+            val msg = try {
+                refresh(app, lat, lon)
+            } catch (e: Exception) {
+                Log.i(TAG, "manual refresh failed: $e")
+                "Refresh failed"
+            } finally {
+                busy.set(false)
+            }
+            android.os.Handler(android.os.Looper.getMainLooper()).post { done(msg) }
+        }
+    }
+
     /** Shared with [UpdateCheck]: neither should touch the network on a captive-portal Wi-Fi. */
     internal fun online(ctx: Context): Boolean {
         val cm = ctx.getSystemService(ConnectivityManager::class.java) ?: return false
@@ -76,7 +100,9 @@ object CameraSync {
             caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
     }
 
-    private fun refresh(ctx: Context, lat: Double, lon: Double) {
+    /** @return a line fit to show a driver who asked for this; the automatic path ignores it. */
+    private fun refresh(ctx: Context, lat: Double, lon: Double): String {
+        val before = CameraDb.get(ctx).size
         val body = "data=" + java.net.URLEncoder.encode(query(lat, lon), "UTF-8")
         for (mirror in MIRRORS) {
             val rows = runCatching { post(mirror, body) }.getOrNull() ?: continue
@@ -89,10 +115,13 @@ object CameraSync {
                 .putFloat("lat", lat.toFloat())
                 .putFloat("lon", lon.toFloat())
                 .apply()
-            Log.i(TAG, "synced ${parsed.size} cameras from $mirror, db now ${CameraDb.get(ctx).size}")
-            return
+            val after = CameraDb.get(ctx).size
+            Log.i(TAG, "synced ${parsed.size} cameras from $mirror, db now $after")
+            return if (after > before) "${after - before} new cameras · $after total"
+                else "Already up to date · $after cameras"
         }
         Log.i(TAG, "every mirror was busy")
+        return "Every mirror was busy, try later"
     }
 
     private fun query(lat: Double, lon: Double): String {

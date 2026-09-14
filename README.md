@@ -102,6 +102,25 @@ those tags silently dropped whole neighbourhoods — a camera 1.3 km from a test
 invisible while RadarBot warned about it. Anything within 25 m of a real road now counts, which
 is better evidence than whether a mapper typed a tag, and still excludes building CCTV.
 
+## Menu
+
+A hamburger in the top-left corner of the phone screen, out of the way of the driving display:
+
+| Item | What it does |
+|---|---|
+| Check for updates | Asks GitHub now, skipping the once-a-day throttle |
+| Refresh camera data | Runs the Overpass download now, skipping the 30 km / one-week throttle. Park first: a busy mirror can take minutes |
+| Add camera here | Records a camera at the current position with a limit you pick — for cameras OpenStreetMap does not have |
+| Download my cameras | Saves `cameras_user.csv` wherever the system file picker points |
+
+Manually added cameras land in the same `cameras_user.csv` as the limits picked after passing an
+unknown camera, which `CameraDb` merges **last** — so a driver's answer beats OpenStreetMap and
+no sync or app update can overwrite it.
+
+Menu actions answer on a line at the top of the screen rather than a Toast, which car displays
+swallow. A message ending in an ellipsis is waiting on something slow and stays up until the
+result replaces it.
+
 ### Live updates
 
 `CameraSync` refreshes from Overpass while driving: a ~100 km box around the current position,
@@ -120,7 +139,7 @@ Needs JDK 17. The Gradle wrapper is checked in.
 JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home ./gradlew :app:assembleRelease
 ```
 
-Unit tests (alert state machine, track filtering, camera merging, driver overrides, geo math — 22 tests, no device):
+Unit tests (alert state machine, track filtering, camera merging, driver overrides, geo math — 29 tests, no device):
 
 ```bash
 JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home ./gradlew :app:test

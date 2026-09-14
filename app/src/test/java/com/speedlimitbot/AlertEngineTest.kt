@@ -214,6 +214,16 @@ class LimitOverrideMergeTest {
         assertTrue(hit.speedCamera)
     }
 
+    /** A camera the driver added by hand is a camera OSM has never heard of. */
+    @Test fun manuallyAddedCameraIsWarnedAbout() {
+        val user = sequenceOf("28.443877,77.058127,80,S")
+        val db = CameraDb.build(osm, user)
+        assertEquals(3, db.size)
+        val hit = db.nearestAhead(28.433877, 77.058127, 0f, 2000.0)!!
+        assertEquals(80, hit.limitKmh)
+        assertTrue(hit.speedCamera)
+    }
+
     /** A later sync carrying no limit must not wipe the driver's answer. */
     @Test fun syncWithoutLimitDoesNotClobberDriverLimit() {
         val user = sequenceOf("13.198438,77.698776,80,S")
