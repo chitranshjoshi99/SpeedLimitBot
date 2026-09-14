@@ -4,7 +4,9 @@ import android.Manifest
 import android.app.Notification
 import android.app.PendingIntent
 import android.content.Context
+import android.content.BroadcastReceiver
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.location.Location
 import android.location.LocationListener
@@ -36,6 +38,15 @@ class AlertService : android.app.Service(), LocationListener {
     private var audio: AlertAudio? = null
     private var beep = AlertEngine.Beep.NONE
     private val track = Track()
+    private var noteText = ""
+
+    /** Runtime-registered so the Quit action needs no exported component. */
+    private val quitReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            Log.i(TAG, "QUIT from notification")
+            stopSelf()
+        }
+    }
     private var armed: CameraDb.Hit? = null
     private var carConnection: CarConnection? = null
     private var carObserver: Observer<Int>? = null
@@ -48,6 +59,10 @@ class AlertService : android.app.Service(), LocationListener {
         ServiceCompat.startForeground(
             this, NOTE_ID, notification("Waiting for GPS"),
             if (Build.VERSION.SDK_INT >= 29) android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION else 0
+        )
+        registerReceiver(
+            quitReceiver, IntentFilter(ACTION_QUIT),
+            if (Build.VERSION.SDK_INT >= 33) Context.RECEIVER_NOT_EXPORTED else 0
         )
         audio = AlertAudio(this)
         tts = TextToSpeech(this) { st ->
@@ -121,6 +136,7 @@ class AlertService : android.app.Service(), LocationListener {
             carAlert(out.limitKmh, hit.distance.toInt(), hit.speedCamera)
         }
         setBeep(out.beep)
+        updateNotification()
         Radar.onChange?.invoke()
     }
 
@@ -137,6 +153,7 @@ class AlertService : android.app.Service(), LocationListener {
         engine.clear()
         setBeep(AlertEngine.Beep.NONE)
         Radar.idle()
+        updateNotification()
         Radar.onChange?.invoke()
     }
 
@@ -185,20 +202,41 @@ class AlertService : android.app.Service(), LocationListener {
     }
 
     private fun notification(text: String): Notification {
-        val pi = PendingIntent.getActivity(
+        val open = PendingIntent.getActivity(
             this, 0, Intent(this, MainActivity::class.java),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+        val quit = PendingIntent.getBroadcast(
+            this, 1, Intent(ACTION_QUIT).setPackage(packageName),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
         return Notification.Builder(this, App.CHANNEL)
             .setContentTitle("SpeedLimitBot")
             .setContentText(text)
             .setSmallIcon(android.R.drawable.ic_menu_compass)
-            .setContentIntent(pi)
+            .setContentIntent(open)
+            .addAction(Notification.Action.Builder(null, "Quit", quit).build())
             .setOngoing(true)
             .build()
     }
 
+    /** Keeps the shade honest about what the service is doing, without redrawing every fix. */
+    private fun updateNotification() {
+        val text = when {
+            !Radar.hasFix -> "Acquiring GPS"
+            Radar.distanceM < 0 -> "Watching — no camera ahead"
+            Radar.limitKmh > 0 -> "Camera ${Radar.distanceM} m · limit ${Radar.limitKmh}"
+            else -> "Camera ${Radar.distanceM} m"
+        }
+        if (text == noteText) return
+        noteText = text
+        if (notificationsAllowed()) {
+            NotificationManagerCompat.from(this).notify(NOTE_ID, notification(text))
+        }
+    }
+
     override fun onDestroy() {
+        runCatching { unregisterReceiver(quitReceiver) }
         runCatching { getSystemService(LocationManager::class.java).removeUpdates(this) }
         carObserver?.let { o -> carConnection?.type?.removeObserver(o) }
         tts?.shutdown()
@@ -224,6 +262,7 @@ class AlertService : android.app.Service(), LocationListener {
 
     companion object {
         private const val TAG = "Radar"
+        private const val ACTION_QUIT = "com.speedlimitbot.QUIT"
         private const val NOTE_ID = 1
         private const val ALERT_ID = 2
         fun start(ctx: Context) {
