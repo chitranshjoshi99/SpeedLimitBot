@@ -17,6 +17,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.SystemClock
 import android.util.Log
 import android.speech.tts.TextToSpeech
 import androidx.car.app.connection.CarConnection
@@ -39,6 +40,9 @@ class AlertService : android.app.Service(), LocationListener {
     private var beep = AlertEngine.Beep.NONE
     private val track = Track()
     private var noteText = ""
+    private var bestProvider: String? = null
+    private var bestRank = 0
+    private var bestAt = 0L
 
     /** Runtime-registered so the Quit action needs no exported component. */
     private val quitReceiver = object : BroadcastReceiver() {
@@ -80,12 +84,44 @@ class AlertService : android.app.Service(), LocationListener {
         Radar.running = true
     }
 
+    /**
+     * GPS alone was a mistake: it needs open sky and a cold start can take minutes, so the
+     * service sat on "Waiting for GPS" indefinitely indoors. Prefer the fused provider, which
+     * merges GPS, wifi, cell and sensors; fall back to GPS plus network on older phones. Seed
+     * from the last known fix so the app says something truthful immediately.
+     */
     private fun startGps() {
-        if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
-            stopSelf(); return
-        }
+        val fine = checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) ==
+            PackageManager.PERMISSION_GRANTED
+        val coarse = checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) ==
+            PackageManager.PERMISSION_GRANTED
+        if (!fine && !coarse) { stopSelf(); return }
+
         val lm = getSystemService(LocationManager::class.java)
-        runCatching { lm.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000L, 0f, this) }
+        val available = runCatching { lm.allProviders }.getOrDefault(emptyList())
+        // Every provider that will have us, rather than betting on one. Fused is the best
+        // source when it works, but it is backed by Play services and returns nothing on some
+        // devices and emulators; GPS is the reliable floor. Network covers the cold start.
+        val wanted = buildList {
+            if (fine && Build.VERSION.SDK_INT >= 31) add(LocationManager.FUSED_PROVIDER)
+            if (fine) add(LocationManager.GPS_PROVIDER)
+            add(LocationManager.NETWORK_PROVIDER)
+        }.filter { available.contains(it) }
+
+        if (wanted.isEmpty()) { Log.i(TAG, "no usable location provider"); return }
+        Log.i(TAG, "providers=$wanted")
+
+        // A recent last-known fix means the notification never has to lie about waiting.
+        wanted.firstNotNullOfOrNull { p ->
+            runCatching { lm.getLastKnownLocation(p) }.getOrNull()
+        }?.let { seed ->
+            if (System.currentTimeMillis() - seed.time < SEED_MAX_AGE_MS) onLocationChanged(seed)
+        }
+
+        wanted.forEach { p ->
+            runCatching { lm.requestLocationUpdates(p, 1000L, 0f, this) }
+                .onFailure { Log.i(TAG, "requestLocationUpdates($p) failed: $it") }
+        }
     }
 
     /** Android Auto disconnects -> we are done. */
@@ -104,6 +140,26 @@ class AlertService : android.app.Service(), LocationListener {
     }
 
     override fun onLocationChanged(loc: Location) {
+        // Several providers are registered so one of them is always working, but their output
+        // must not be mixed: fused and GPS disagree by metres, network by hundreds, and the
+        // zig-zag inflates speed. Rank them and ignore anything worse than what is currently
+        // arriving. "First to speak wins" was tried and is wrong — a provider can republish one
+        // stale cached fix every second and lock out the one actually tracking the car.
+        val now = SystemClock.elapsedRealtime()
+        val rank = when (loc.provider) {
+            LocationManager.GPS_PROVIDER -> 3
+            LocationManager.FUSED_PROVIDER -> 2
+            LocationManager.NETWORK_PROVIDER -> 1
+            else -> 0
+        }
+        if (rank < bestRank && now - bestAt < LEADER_STALE_MS) return
+        if (loc.provider != bestProvider) {
+            Log.i(TAG, "following ${loc.provider} acc=${loc.accuracy}m")
+            bestProvider = loc.provider
+        }
+        bestRank = rank
+        bestAt = now
+
         Radar.hasFix = true
         // Refresh on any position at all — waiting for a valid heading would mean a phone
         // sitting still in traffic never updates its map.
@@ -264,6 +320,8 @@ class AlertService : android.app.Service(), LocationListener {
         private const val TAG = "Radar"
         private const val ACTION_QUIT = "com.speedlimitbot.QUIT"
         private const val NOTE_ID = 1
+        private const val LEADER_STALE_MS = 10_000L
+        private const val SEED_MAX_AGE_MS = 5 * 60_000L
         private const val ALERT_ID = 2
         fun start(ctx: Context) {
             runCatching { ctx.startForegroundService(Intent(ctx, AlertService::class.java)) }

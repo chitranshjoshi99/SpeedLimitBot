@@ -1,6 +1,10 @@
 # SpeedLimitBot
 
-Offline speed-camera warner. Minimal UI, real Android Auto app. Release APK: **880 KB**.
+Offline speed-camera warner. Minimal UI, real Android Auto app.
+
+Position comes from whichever provider is actually working — fused, GPS or network, ranked so
+a provider republishing one stale cached fix cannot lock out the one tracking the car — seeded
+from the last known fix so it never sits on "Acquiring GPS" with nothing to show. Release APK: **880 KB**.
 
 ## Install
 
