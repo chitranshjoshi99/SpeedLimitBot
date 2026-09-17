@@ -52,11 +52,38 @@ Two ways to get it into a real car:
 | Android Auto session starts | service auto-starts, car screen appears |
 | car Bluetooth connects (no Auto) | service auto-starts |
 | Auto session ends / Bluetooth disconnects | service stops |
-| a newer GitHub release exists | banner at the top of the screen, tap to open the release page |
+| a newer GitHub release exists | banner at the top of the screen, tap to download and install it |
 
 Thresholds live in `AlertEngine` (`ANNOUNCE_S`, `CLOSE_S`, `OVER_TOLERANCE_KMH`, `RANGE_M`).
-Only cameras inside a 55° cone ahead of the direction of travel count, so the opposite
-carriageway stays silent.
+Only cameras inside a 55° cone ahead of the direction of travel count. The screen tints while a
+camera is in range and pulses only while the beeps are sounding.
+
+### Which cameras are "ours"
+
+A cone alone warns about the camera on the cross street at a junction and on the other
+carriageway of a divided road. So each synced camera records the roads within 25 m of it —
+travel heading, class, mapped `maxspeed` — as a fifth CSV column (`87P;267P;175S40`), and
+the driver's heading must match one of them within 35° (60° for the camera already being
+warned about, so a bend does not re-announce it):
+
+- Only the **nearest carriageway per axis** is kept, and a one-way way contributes one heading,
+  so the opposite side of a divided road is excluded.
+- `camera:direction` picks the road at a junction. It is on 64% of Bengaluru's cameras and
+  within 15° of the nearest road axis for 72% of those.
+- Rows without the column (bundled asset, older downloads, cameras added by hand) warn exactly
+  as before until a sync covers them.
+
+Not solvable from this data: a parallel service road or flyover with the same heading. That
+needs map matching against the live route, not a map on screen.
+
+### Predicted limits
+
+Where no limit is mapped, it is predicted from the class of the road the driver is on:
+motorway 100, trunk 80, primary 60, secondary/tertiary 50. Basis: MoRTH's 2018 notification
+(M1: 120 expressway, 100 four-lane NH) with the lower state figures most cameras actually sit
+under — Bengaluru 60 in city limits and 80 on designated arterials, Kerala 50 in municipal
+limits, Delhi mostly 50. A predicted limit is spoken as "Limit likely 50", and the picker is
+still offered after passing so the driver's answer replaces the guess.
 
 `Track` turns raw fixes into speed and heading, and exists because providers misbehave in
 three ways that all showed up on a real run: they repeat the last position verbatim, they
@@ -169,8 +196,11 @@ checked against the fingerprint above. `workflow_dispatch` rebuilds an existing 
 
 `UpdateCheck` asks the GitHub releases API for the latest tag at most once a day, only on a
 validated connection, and compares it to the installed `versionName` segment by segment (a
-string compare would rank 1.0.10 below 1.0.9). Nothing is downloaded or installed — a newer
-tag only lights the banner, which opens the release page. Every failure is silent.
+string compare would rank 1.0.10 below 1.0.9). A newer tag with an `.apk` attached lights the
+banner. Tapping it streams the APK into a `PackageInstaller` session: the system shows one
+"Update?" prompt (the first time, it also asks to allow installs from this app). The platform
+refuses an APK not signed with the installed key. After the app has installed itself once it is
+the installer of record, so on Android 12+ later updates can go through without a prompt.
 
 `local.properties` points at `~/Library/Android/sdk`. `gradle.properties` pins
 `org.gradle.java.home` to the Homebrew JDK 17 — change it if yours lives elsewhere.
@@ -242,12 +272,16 @@ untested there is the projection transport rather than the app's behaviour. See
 ## Alerts and accessibility
 
 Everything audible plays as `USAGE_ASSISTANCE_NAVIGATION_GUIDANCE` and holds
-`AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK` for as long as a camera is live. Music ducks while the
-warning speaks or beeps and restores itself the moment focus is released — the restore is the
-system's job, so it survives the app being killed mid-alert. Beeps are synthesised through
-`AudioTrack` rather than `ToneGenerator`, because `ToneGenerator` only accepts a legacy stream
-type and cannot carry guidance attributes; its output would compete with the music instead of
-ducking it.
+`AUDIOFOCUS_GAIN_TRANSIENT` while — and only while — the warning speaks or beeps. Other apps
+pause rather than duck (a ducked song over a car stereo still buries a beep) and resume when
+focus is released; the resume is the system's job, so it survives the app being killed
+mid-alert. Losing focus to another app clears our record of holding it, so the next warning
+asks again.
+
+Beeps are synthesised through `AudioTrack` rather than `ToneGenerator`, which only accepts a
+legacy stream type. Each pattern is one long-lived static track (tone plus silence) looped by
+the mixer. Building a fresh track per beep, as before, left it reachable only weakly from native
+code, so the collector could finalize it mid-beep — the screen flashed and nothing played.
 
 The app plays its own beeps at full gain and **never touches the user's volume settings**.
 Raising the system media volume to force loudness would leave the car's stereo turned up after

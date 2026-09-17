@@ -26,7 +26,7 @@ class RadarSurface(private val ctx: CarContext) : SurfaceCallback {
         override fun run() {
             bright = !bright
             draw()
-            if (Radar.distanceM >= 0) handler.postDelayed(this, PULSE_MS)
+            if (Radar.beeping) handler.postDelayed(this, PULSE_MS)
         }
     }
 
@@ -37,7 +37,8 @@ class RadarSurface(private val ctx: CarContext) : SurfaceCallback {
     /** Called whenever the alert state changes, so the pulse starts and stops with it. */
     fun onStateChanged() {
         handler.removeCallbacks(pulse)
-        if (Radar.distanceM >= 0) handler.post(pulse) else { bright = false; draw() }
+        // Pulses only while beeping, like the phone screen; a camera merely in range holds dim.
+        if (Radar.beeping) handler.post(pulse) else { bright = false; draw() }
     }
 
     override fun onSurfaceAvailable(surfaceContainer: SurfaceContainer) {

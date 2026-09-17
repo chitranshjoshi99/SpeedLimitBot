@@ -20,6 +20,7 @@ import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
 import android.speech.tts.TextToSpeech
+import android.speech.tts.UtteranceProgressListener
 import androidx.car.app.connection.CarConnection
 import androidx.car.app.notification.CarAppExtender
 import androidx.core.app.NotificationCompat
@@ -44,9 +45,16 @@ class AlertService : android.app.Service(), LocationListener {
     private var bestRank = 0
     private var bestAt = 0L
 
-    /** Runtime-registered so the Quit action needs no exported component. */
+    /** Runtime-registered so the Quit and repost actions need no exported component. */
     private val quitReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action == ACTION_DISMISSED) {
+                // Android 14 lets a swipe clear even an ongoing foreground-service notification,
+                // and no flag prevents it. Put it straight back: the only way off is Quit.
+                noteText = ""
+                updateNotification()
+                return
+            }
             Log.i(TAG, "QUIT from notification")
             stopSelf()
         }
@@ -66,19 +74,27 @@ class AlertService : android.app.Service(), LocationListener {
             if (Build.VERSION.SDK_INT >= 29) android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION else 0
         )
         registerReceiver(
-            quitReceiver, IntentFilter(ACTION_QUIT),
+            quitReceiver, IntentFilter(ACTION_QUIT).apply { addAction(ACTION_DISMISSED) },
             if (Build.VERSION.SDK_INT >= 33) Context.RECEIVER_NOT_EXPORTED else 0
         )
         audio = AlertAudio(this)
         CarMessage.register(this)
         tts = TextToSpeech(this) { st ->
             Log.i(TAG, "TTS init status=$st")
-            if (st == TextToSpeech.SUCCESS) tts?.setAudioAttributes(
+            if (st != TextToSpeech.SUCCESS) return@TextToSpeech
+            tts?.setAudioAttributes(
                 AudioAttributes.Builder()
                     .setUsage(AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
                     .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
                     .build()
             )
+            // Focus is held for exactly as long as the words take; callbacks arrive off main.
+            tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+                override fun onStart(id: String?) {}
+                override fun onDone(id: String?) { handler.post { audio?.setSpeaking(false) } }
+                @Deprecated("legacy") override fun onError(id: String?) { handler.post { audio?.setSpeaking(false) } }
+                override fun onStop(id: String?, interrupted: Boolean) { handler.post { audio?.setSpeaking(false) } }
+            })
         }
         CameraDb.get(this)
         startGps()
@@ -182,7 +198,7 @@ class AlertService : android.app.Service(), LocationListener {
         }
 
         val hit = CameraDb.get(this)
-            .nearestAhead(loc.latitude, loc.longitude, fix.heading, AlertEngine.RANGE_M)
+            .nearestAhead(loc.latitude, loc.longitude, fix.heading, AlertEngine.RANGE_M, armed?.id ?: -1)
         if (hit == null) { standDown(); return }
         rememberIfUnknown(hit)
 
@@ -192,7 +208,8 @@ class AlertService : android.app.Service(), LocationListener {
 
         val out = engine.update(hit.id, hit.distance, fix.speedMps, hit.limitKmh)
         if (out.announce) {
-            speak(out.limitKmh, hit.speedCamera)
+            speak(out.limitKmh, hit.speedCamera, hit.guessed)
+            Log.i(TAG, "  at %.6f,%.6f guessed=%b".format(hit.lat, hit.lon, hit.guessed))
             carAlert(out.limitKmh, hit.distance.toInt(), hit.speedCamera)
         }
         carMessage(hit, out.announce)
@@ -207,7 +224,8 @@ class AlertService : android.app.Service(), LocationListener {
         armed = hit
         if (was == null || was.id == hit?.id) return
         messagedOver = false          // a different camera starts a fresh warning
-        if (was.limitKmh == 0) Radar.pending = Radar.Unknown(was.lat, was.lon, was.speedCamera)
+        // A predicted limit is worth confirming too; the driver's answer then replaces the guess.
+        if (was.limitKmh == 0 || was.guessed) Radar.pending = Radar.Unknown(was.lat, was.lon, was.speedCamera)
     }
 
     /**
@@ -273,18 +291,25 @@ class AlertService : android.app.Service(), LocationListener {
     private fun notificationsAllowed() = Build.VERSION.SDK_INT < 33 ||
         checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
 
-    private fun speak(limit: Int, speedCamera: Boolean) {
-        // Duck the music for the announcement even when no beep is running yet.
-        audio?.takeFocus()
+    private fun speak(limit: Int, speedCamera: Boolean, guessed: Boolean) {
         val what = if (speedCamera) "Speed camera ahead" else "Traffic camera ahead"
-        val words = if (limit > 0) "$what. Limit $limit" else what
+        // A predicted limit says so: the driver should trust a sign over it.
+        val words = when {
+            limit <= 0 -> what
+            guessed -> "$what. Limit likely $limit"
+            else -> "$what. Limit $limit"
+        }
+        // Quiet the music first, so the first word is not lost under it.
+        audio?.setSpeaking(true)
         val r = tts?.speak(words, TextToSpeech.QUEUE_FLUSH, null, "cam")
+        if (r != TextToSpeech.SUCCESS) audio?.setSpeaking(false)
         Log.i(TAG, "SPEAK limit=$limit dist=${Radar.distanceM} speed=${Radar.speedKmh} speedCam=$speedCamera result=$r")
     }
 
     private fun setBeep(b: AlertEngine.Beep) {
         if (b == beep) return
         beep = b
+        Radar.beeping = b != AlertEngine.Beep.NONE
         Log.i(TAG, "BEEP $b dist=${Radar.distanceM} speed=${Radar.speedKmh} limit=${Radar.limitKmh}")
         audio?.setPattern(b)
     }
@@ -298,11 +323,16 @@ class AlertService : android.app.Service(), LocationListener {
             this, 1, Intent(ACTION_QUIT).setPackage(packageName),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
+        val dismissed = PendingIntent.getBroadcast(
+            this, 2, Intent(ACTION_DISMISSED).setPackage(packageName),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
         return Notification.Builder(this, App.CHANNEL)
             .setContentTitle("SpeedLimitBot")
             .setContentText(text)
             .setSmallIcon(android.R.drawable.ic_menu_compass)
             .setContentIntent(open)
+            .setDeleteIntent(dismissed)
             .addAction(Notification.Action.Builder(null, "Quit", quit).build())
             .setOngoing(true)
             .build()
@@ -352,6 +382,7 @@ class AlertService : android.app.Service(), LocationListener {
     companion object {
         private const val TAG = "Radar"
         private const val ACTION_QUIT = "com.speedlimitbot.QUIT"
+        private const val ACTION_DISMISSED = "com.speedlimitbot.NOTE_DISMISSED"
         private const val NOTE_ID = 1
         private const val LEADER_STALE_MS = 10_000L
         private const val SEED_MAX_AGE_MS = 5 * 60_000L

@@ -15,6 +15,9 @@ object Radar {
     var distanceM by mutableIntStateOf(-1)
     var over by mutableStateOf(false)
 
+    /** True while a beep pattern is sounding. The screen pulses on this, so flash means sound. */
+    var beeping by mutableStateOf(false)
+
     /** Last known position. NaN until the first fix; the menu needs it to place a new camera. */
     var lat by mutableDoubleStateOf(Double.NaN)
     var lon by mutableDoubleStateOf(Double.NaN)
@@ -31,5 +34,6 @@ object Radar {
         limitKmh = 0
         distanceM = -1
         over = false
+        beeping = false
     }
 }

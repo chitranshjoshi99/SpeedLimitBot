@@ -188,7 +188,13 @@ private fun Screen(onQuit: () -> Unit, onExport: () -> Unit) {
         animationSpec = infiniteRepeatable(tween(if (over) 340 else 700, easing = FastOutSlowInEasing), RepeatMode.Reverse),
         label = "flashAlpha"
     )
-    val ground = if (!armed) Ink else lerp(Ink, wash, 0.34f + 0.46f * flash)
+    // Steady tint while a camera is merely in range; the pulse is reserved for when the beeps
+    // are sounding, so the screen never flashes at a driver who hears nothing.
+    val ground = when {
+        !armed -> Ink
+        Radar.beeping -> lerp(Ink, wash, 0.34f + 0.46f * flash)
+        else -> lerp(Ink, wash, 0.34f)
+    }
 
     // The wash paints the whole window, system bars included — that is the point of it. What
     // has to be readable sits inside, clear of the bars.
@@ -229,12 +235,6 @@ private fun Screen(onQuit: () -> Unit, onExport: () -> Unit) {
             }
         }
 
-        LimitPicker(
-            Modifier
-                .align(Alignment.BottomCenter)
-                .padding(bottom = 96.dp)
-        )
-
         UpdateBanner(
             Modifier
                 .align(Alignment.TopCenter)
@@ -245,6 +245,8 @@ private fun Screen(onQuit: () -> Unit, onExport: () -> Unit) {
             horizontalAlignment = Alignment.CenterHorizontally,
             modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 40.dp)
         ) {
+            // In the same column as the status line, so it pushes it down rather than landing on it.
+            LimitPicker(Modifier.padding(bottom = 28.dp))
             BasicText(
                 when {
                     !Radar.running -> "STOPPED"
@@ -277,7 +279,7 @@ private fun Screen(onQuit: () -> Unit, onExport: () -> Unit) {
 
 /**
  * Sideloaded builds never get a Play update prompt, so a newer GitHub release says so here.
- * Tapping opens the release page — the driver installs it when parked, not mid-drive.
+ * Tapping downloads it and opens the system install prompt — the driver taps when parked.
  */
 @Composable
 private fun UpdateBanner(modifier: Modifier = Modifier) {
@@ -295,7 +297,8 @@ private fun UpdateBanner(modifier: Modifier = Modifier) {
             modifier = Modifier
                 .clickable(remember { MutableInteractionSource() }, indication = null) {
                     release?.let {
-                        runCatching { ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(it.url))) }
+                        Say.text = "Downloading ${it.version}…"
+                        UpdateCheck.install(ctx, it) { msg -> Say.text = msg }
                     }
                 }
                 .padding(horizontal = 24.dp, vertical = 10.dp)

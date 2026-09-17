@@ -2,6 +2,7 @@ package com.speedlimitbot
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -256,5 +257,83 @@ class TrackSpeedResponseTest {
             t.update(lat(6 - i), 77.594566, time, mps, 0f)?.let { last = it.speedMps }
         }
         assertEquals(30f, last * 3.6f, 0.5f)
+    }
+}
+
+class ApproachTest {
+
+    private val cam = 12.970000 to 77.600000
+    private val east = 0.00030           // ~33 m of longitude at 12.97 N
+    private val side = 0.00008           // ~9 m of latitude
+
+    /** A road running east-west through [lat], from 300 m west of the camera to 300 m east. */
+    private fun ew(lat: Double, cls: Char, oneway: Int, max: Int = 0) = CameraSync.Road(
+        cls, oneway, max,
+        doubleArrayOf(lat, lat), doubleArrayOf(cam.second - east * 9, cam.second + east * 9)
+    )
+
+    private fun ns(lon: Double, cls: Char) = CameraSync.Road(
+        cls, 0, 0,
+        doubleArrayOf(cam.first - side * 30, cam.first + side * 30), doubleArrayOf(lon, lon)
+    )
+
+    /** Divided road: the carriageway the camera stands beside wins, the far one is dropped. */
+    @Test fun nearestCarriagewayOnly() {
+        val roads = listOf(
+            ew(cam.first + side, 'T', 1),                 // eastbound, 9 m north of the camera
+            CameraSync.Road('T', 1, 0,                     // westbound, 18 m south
+                doubleArrayOf(cam.first - side * 2, cam.first - side * 2),
+                doubleArrayOf(cam.second + east * 9, cam.second - east * 9))
+        )
+        assertEquals("90T", CameraSync.approaches(cam.first, cam.second, null, roads))
+    }
+
+    @Test fun twoWayRoadGivesBothHeadingsAndMappedLimit() {
+        assertEquals("90P40;270P40", CameraSync.approaches(cam.first, cam.second, null, listOf(ew(cam.first, 'P', 0, 40))))
+    }
+
+    /** At a junction the camera's own direction picks the road it watches. */
+    @Test fun cameraDirectionRulesOutCrossStreet() {
+        val roads = listOf(ew(cam.first + side, 'S', 0), ns(cam.second, 'P'))
+        assertEquals("0P;180P", CameraSync.approaches(cam.first, cam.second, 185f, roads))
+        // Without a direction both roads count: a junction camera we cannot place warns either way.
+        assertEquals(4, CameraSync.approaches(cam.first, cam.second, null, roads).split(';').size)
+    }
+
+    @Test fun farRoadIsIgnored() {
+        assertEquals("", CameraSync.approaches(cam.first, cam.second, null, listOf(ew(cam.first + side * 6, 'P', 0))))
+    }
+
+    /** Heading south towards a camera on an east-west road: it is not ours. */
+    @Test fun crossStreetCameraIsSilent() {
+        val db = CameraDb.build(sequenceOf("12.970000,77.600000,0,T,90P;270P"))
+        assertNull(db.nearestAhead(12.975, 77.600, 180f, 3000.0))
+        val hit = db.nearestAhead(12.970, 77.595, 90f, 3000.0)!!
+        assertEquals(60, hit.limitKmh)
+        assertTrue(hit.guessed)
+    }
+
+    /** A mapped limit beats the class guess, and a driver's answer beats both. */
+    @Test fun mappedLimitsWinOverGuesses() {
+        val row = "12.970000,77.600000,0,T,90P40;270P40"
+        assertFalse(CameraDb.build(sequenceOf(row)).nearestAhead(12.970, 77.595, 90f, 3000.0)!!.guessed)
+        val user = sequenceOf("12.970000,77.600000,70,S")
+        val hit = CameraDb.build(sequenceOf("12.970000,77.600000,0,T,90P;270P"), user)
+            .nearestAhead(12.970, 77.595, 90f, 3000.0)!!
+        assertEquals(70, hit.limitKmh)
+        assertFalse(hit.guessed)
+    }
+
+    /** The camera already being warned about survives a bend the fresh match would reject. */
+    @Test fun armedCameraToleratesABend() {
+        val db = CameraDb.build(sequenceOf("12.970000,77.600000,0,T,90P"))
+        assertNull(db.nearestAhead(12.970, 77.595, 140f, 3000.0))
+        assertEquals(0, db.nearestAhead(12.970, 77.595, 140f, 3000.0, keepId = 0)!!.id)
+    }
+
+    /** Rows from before roads were recorded keep warning exactly as they did. */
+    @Test fun rowsWithoutApproachesAreUnfiltered() {
+        val db = CameraDb.build(sequenceOf("12.970000,77.600000,0,T"))
+        assertNotNull(db.nearestAhead(12.975, 77.600, 180f, 3000.0))
     }
 }
