@@ -112,6 +112,22 @@ class TrackTest {
         assertEquals(15f, f.speedMps, 1f)
     }
 
+    /** Parked, a cold-start fix lands 30 m off: that is not 108 km/h. */
+    @Test fun coarseFixWhileParkedIsNotSpeed() {
+        val t = Track()
+        t.update(north(0), 77.594566, 1000L, null, null, 5f)
+        assertNull(t.update(north(2), 77.594566, 2000L, null, null, 60f))
+        assertNull(t.update(north(0), 77.594566, 3000L, null, null, 5f))
+    }
+
+    /** Switching provider must not pair two providers' idea of the same spot. */
+    @Test fun resetDropsThePreviousFix() {
+        val t = Track()
+        t.update(north(0), 77.594566, 1000L, null, null)
+        t.reset()
+        assertNull(t.update(north(1), 77.594566, 2000L, null, null))
+    }
+
     @Test fun duplicateFixHoldsState() {
         val t = Track()
         t.update(north(3), 77.594566, 1000L, null, null)

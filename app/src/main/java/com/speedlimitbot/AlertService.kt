@@ -129,11 +129,18 @@ class AlertService : android.app.Service(), LocationListener {
         if (wanted.isEmpty()) { Log.i(TAG, "no usable location provider"); return }
         Log.i(TAG, "providers=$wanted")
 
-        // A recent last-known fix means the notification never has to lie about waiting.
+        // A recent last-known fix means the notification never has to lie about waiting. It
+        // places the car only: paired with the first live fix — minutes later, possibly from a
+        // coarser provider — it read as a burst of speed while parked.
         wanted.firstNotNullOfOrNull { p ->
             runCatching { lm.getLastKnownLocation(p) }.getOrNull()
         }?.let { seed ->
-            if (System.currentTimeMillis() - seed.time < SEED_MAX_AGE_MS) onLocationChanged(seed)
+            if (System.currentTimeMillis() - seed.time < SEED_MAX_AGE_MS) {
+                Radar.hasFix = true
+                Radar.lat = seed.latitude
+                Radar.lon = seed.longitude
+                updateNotification()
+            }
         }
 
         wanted.forEach { p ->
@@ -174,6 +181,7 @@ class AlertService : android.app.Service(), LocationListener {
         if (loc.provider != bestProvider) {
             Log.i(TAG, "following ${loc.provider} acc=${loc.accuracy}m")
             bestProvider = loc.provider
+            track.reset()
         }
         bestRank = rank
         bestAt = now
@@ -188,7 +196,8 @@ class AlertService : android.app.Service(), LocationListener {
         val fix = track.update(
             loc.latitude, loc.longitude, loc.time,
             if (loc.hasSpeed() && loc.speed > 0f) loc.speed else null,
-            if (loc.hasBearing() && loc.hasSpeed() && loc.speed > AlertEngine.MIN_MOVING_MPS) loc.bearing else null
+            if (loc.hasBearing() && loc.hasSpeed() && loc.speed > AlertEngine.MIN_MOVING_MPS) loc.bearing else null,
+            if (loc.hasAccuracy()) loc.accuracy else 0f
         ) ?: return
 
         Radar.speedKmh = (fix.speedMps * 3.6f).toInt()

@@ -20,7 +20,12 @@ class Track {
     private var smoothed = Float.NaN
 
     /** @return the fix to act on, or null when this sample says nothing (hold the last state). */
-    fun update(lat: Double, lon: Double, timeMs: Long, provSpeed: Float?, provBearing: Float?): Fix? {
+    fun update(lat: Double, lon: Double, timeMs: Long, provSpeed: Float?, provBearing: Float?, accuracyM: Float = 0f): Fix? {
+        // A cold-start or network fix wanders by tens of metres from one sample to the next, and
+        // a pair of them reads as driving: the phantom speed shown on opening the app while
+        // parked. Skip it without touching state, so the next good fix pairs with the last good one.
+        if (accuracyM > MAX_ACCURACY_M) return null
+
         val prevLat = this.lat
         val prevLon = this.lon
         val dt = (timeMs - time) / 1000f
@@ -60,6 +65,12 @@ class Track {
         return Fix(0f, Float.NaN)
     }
 
+    /** Positions from different providers disagree by metres, so a pair across them is not motion. */
+    fun reset() {
+        lat = Double.NaN
+        smoothed = Float.NaN
+    }
+
     /**
      * Fix intervals jitter, so a raw delta-over-dt speed swings wildly between samples and
      * makes the over-limit beep chatter. One pole of low-pass is enough to settle it.
@@ -77,5 +88,7 @@ class Track {
         const val MAX_MPS = 70.0
         const val MIN_TRACK_M = 4.0
         const val STOP_GRACE_MS = 5_000L
+        /** A car GPS fix is 3–10 m; worse than this is a cold start, indoors or network-only. */
+        const val MAX_ACCURACY_M = 30f
     }
 }
