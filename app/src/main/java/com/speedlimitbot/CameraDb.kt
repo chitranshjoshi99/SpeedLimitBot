@@ -68,6 +68,13 @@ class CameraDb private constructor(
         return best
     }
 
+    /** Up to [max] cameras nearest to a point, closest first, with their mapped limit. */
+    fun nearest(myLat: Double, myLon: Double, max: Int): List<Hit> =
+        limit.indices
+            .map { Hit(it, distance(myLat, myLon, lat[it], lon[it]), limit[it], speedCam[it], lat[it], lon[it]) }
+            .sortedBy { it.distance }
+            .take(max)
+
     /**
      * @param speedCamera false for a traffic camera, which may not enforce speed at all.
      * @param guessed the limit is predicted from the class of road, not mapped.

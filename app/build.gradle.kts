@@ -37,6 +37,14 @@ android {
         }
     }
 
+    // Play forbids an app updating itself outside Play, so only the sideloaded build carries the
+    // GitHub self-update and the install permissions it needs (src/github).
+    flavorDimensions += "store"
+    productFlavors {
+        create("github") { dimension = "store" }
+        create("play") { dimension = "store" }
+    }
+
     buildTypes {
         release {
             signingConfig = signingConfigs.findByName("release")

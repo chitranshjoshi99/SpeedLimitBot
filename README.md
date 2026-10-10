@@ -36,9 +36,13 @@ colour wash — but the car screen stays empty until the app is installed **thro
 
 Two ways to get it into a real car:
 
-1. **Play internal testing.** Upload `app-release.aab` (`./gradlew bundleRelease`) to a Play
-   Console app, add yourself as an internal tester, and install from the Play link. Internal
-   testing installs count as a trusted source. Needs a Play developer account.
+1. **Play internal testing.** Upload the release's `.aab` (`./gradlew bundlePlayRelease`) to a
+   Play Console app, add yourself as an internal tester, and install from the Play link.
+   Internal testing installs count as a trusted source, and Play does no Android Auto review on
+   the internal track, so it works in the car straight away. Open testing and production *are*
+   reviewed, and a navigation-category app must provide turn-by-turn directions
+   ([NF-1](https://developer.android.com/docs/quality-guidelines/car-app-quality)), which
+   this app does not — so a public Play listing with car support is blocked on that.
 2. **Desktop Head Unit**, for development only — see `tools/dhu.md`. Sideloaded apps do work
    there, which is why this gap does not show up until a real car.
 
@@ -137,6 +141,9 @@ A hamburger in the top-left corner of the phone screen, out of the way of the dr
 |---|---|
 | Check for updates | Asks GitHub now, skipping the once-a-day throttle |
 | Refresh camera data | Runs the Overpass download now, skipping the 30 km / one-week throttle. Park first: a busy mirror can take minutes |
+| Drive with Google Maps | Turns on the floating bubble (asking for "display over other apps" the first time), starts the radar, opens Google Maps |
+| Turn off floating bubble | Shown while the bubble is on |
+| Show cameras in OsmAnd | Shown when OsmAnd is installed; pushes the 2000 nearest cameras onto its map |
 | Add camera here | Records a camera at the current position with a limit you pick — for cameras OpenStreetMap does not have |
 | Download my cameras | Saves `cameras_user.csv` wherever the system file picker points |
 
@@ -150,7 +157,8 @@ result replaces it.
 
 ### Live updates
 
-`CameraSync` refreshes from Overpass while driving: a ~100 km box around the current position,
+`CameraSync` refreshes from Overpass while driving: a ~100 km box around the current position
+(centre snapped to a 0.1° grid, so the request reveals the region, not the car),
 triggered after moving 30 km from the last download or once the data is a week old, only on a
 validated connection, one request at a time, with mirror fallback. Downloads merge into the
 bundled set — coverage only ever grows, and the app keeps working with no network at all.
@@ -163,19 +171,25 @@ serving camera locations; see the README section below.
 Needs JDK 17. The Gradle wrapper is checked in.
 
 ```bash
-JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home ./gradlew :app:assembleRelease
+JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home ./gradlew :app:assembleGithubRelease
 ```
 
 Unit tests (alert state machine, track filtering, camera merging, driver overrides, geo math — 29 tests, no device):
 
 ```bash
-JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home ./gradlew :app:test
+JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home ./gradlew :app:testGithubReleaseUnitTest
 ```
 
 ### Releasing
 
+Two flavors. `github` is the sideloaded APK, with the GitHub self-update below. `play` is the
+AAB for Play, without it: Play forbids apps updating themselves outside Play, so the update
+code and the install permissions live only in `src/github` (`SELF_UPDATE` in `Store.kt`).
+
 Publishing a release on GitHub runs `.github/workflows/release.yml`, which builds the signed
-APK and AAB at that tag and attaches them as `SpeedLimitBot-<version>.apk` and `.aab`. Bump
+`github` APK and `play` AAB at that tag and attaches them as `SpeedLimitBot-<version>.apk` and
+`.aab`. Play re-signs the AAB with its own key, so a Play install and a sideloaded APK cannot
+update each other — uninstall one before installing the other. Bump
 `versionCode`/`versionName` in `app/build.gradle.kts` first — the workflow refuses to build a
 tag that disagrees with `versionName`, because the in-app update check compares the two.
 
@@ -187,6 +201,14 @@ Four repository secrets carry the signing key, so it never touches the repo:
 | `KEYSTORE_PASSWORD` | `storePassword` from `~/.speedlimitbot/keystore.properties` |
 | `KEY_ALIAS` | `keyAlias` from the same file |
 | `KEY_PASSWORD` | `keyPassword` from the same file |
+
+Optional fifth, `PLAY_SERVICE_ACCOUNT_JSON`: a Play Console service account's JSON key (Play
+Console → Users and permissions, with "Release to testing tracks"). With it, every release also
+lands on Play's **internal testing** track; promote from there in the Console. Play's API cannot
+create an app, so the first AAB is uploaded by hand.
+
+Privacy policy for the Play listing: [`PRIVACY.md`](PRIVACY.md). Change it if the data the app
+sends changes — Play checks it against the Data safety form.
 
 The build fails loudly if `KEYSTORE_BASE64` is missing rather than shipping an unsigned APK,
 and `apksigner verify --print-certs` prints the certificate SHA-256 in the log so it can be
@@ -298,6 +320,26 @@ both the bundled data and any later download, and it is used from the next pass 
 choices rather than a keyboard: text entry while driving is blocked by the car host and is a
 bad idea on the phone too.
 
+## Alongside Google Maps
+
+The app never talks to Google Maps; both run side by side. Maps navigates. This app keeps
+watching in its foreground service, beeps and speaks over Maps' own audio, and on the phone
+draws a draggable floating bubble (`Bubble`) over it. The bubble shows speed when idle, the
+limit in amber near a camera, red over the limit, and pulses while beeping. Tapping it opens
+the app, where it hides.
+
+On Android Auto the bubble does not exist: an overlay window does not project, and no API lets
+one app draw over another's map in the car. There the same warning arrives as audio and as the
+heads-up and messaging notifications below, all of which show over Google Maps.
+
+## OsmAnd
+
+`OsmAnd` pushes the cameras onto OsmAnd's map as a GPX waypoint layer through its AIDL API (a
+raw binder call to `importGpx`, so no dependency), after every sync and from the menu. It is
+display only: OsmAnd's API exposes no current road or route geometry, so it cannot make these
+alerts route-aware, and its Android Auto mode is a paid feature of the Play build.
+**Untested against a real OsmAnd install.**
+
 ## Android Auto: warnings as messages
 
 A sideloaded Car App Library app does not get its templates rendered in a real car, but the
@@ -338,7 +380,8 @@ Shipping the navigation category on Play means meeting the
 
 ## Runtime setup on the phone
 
-1. Grant location — choose **Allow all the time** (background location).
+1. Grant location — choose **Allow all the time** (background location). A disclosure screen
+   comes first, as Play requires; "Not now" skips it and the app still works while open.
 2. Allow notifications and Bluetooth.
 3. Accept the battery-optimisation exemption prompt. Without it Android 12+ refuses to let
    the Bluetooth broadcast start a location foreground service, and auto-start silently fails.

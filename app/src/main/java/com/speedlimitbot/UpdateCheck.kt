@@ -150,6 +150,7 @@ object UpdateCheck {
      * the main thread with something to show the person who tapped.
      */
     fun check(ctx: Context, done: (String) -> Unit) {
+        if (!SELF_UPDATE) { done("Updates come from Play"); return }
         if (!CameraSync.online(ctx)) { done("No internet"); return }
         if (!busy.compareAndSet(false, true)) { done("Already checking"); return }
         val app = ctx.applicationContext

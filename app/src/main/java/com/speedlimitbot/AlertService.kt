@@ -215,6 +215,7 @@ class AlertService : android.app.Service(), LocationListener {
         carMessage(hit, out.announce)
         setBeep(out.beep)
         updateNotification()
+        Bubble.update(this)
         Radar.onChange?.invoke()
     }
 
@@ -256,6 +257,7 @@ class AlertService : android.app.Service(), LocationListener {
         setBeep(AlertEngine.Beep.NONE)
         Radar.idle()
         updateNotification()
+        Bubble.update(this)
         Radar.onChange?.invoke()
     }
 
@@ -360,6 +362,7 @@ class AlertService : android.app.Service(), LocationListener {
         carObserver?.let { o -> carConnection?.type?.removeObserver(o) }
         tts?.shutdown()
         audio?.release()
+        Bubble.hide(this)
         Radar.running = false
         Radar.hasFix = false
         Radar.idle()

@@ -121,6 +121,7 @@ object CameraSync {
             if (parsed.isEmpty()) continue
             merge(ctx, parsed)
             CameraDb.reload(ctx)
+            OsmAnd.push(ctx, lat, lon)       // keeps OsmAnd's map in step; a no-op without it
             ctx.getSharedPreferences(PREF, Context.MODE_PRIVATE).edit()
                 .putLong("at", System.currentTimeMillis())
                 .putFloat("lat", lat.toFloat())
@@ -135,8 +136,13 @@ object CameraSync {
         return BUSY
     }
 
-    private fun query(lat: Double, lon: Double): String {
-        val bbox = "%.4f,%.4f,%.4f,%.4f".format(lat - SPAN_DEG, lon - SPAN_DEG, lat + SPAN_DEG, lon + SPAN_DEG)
+    private fun query(fixLat: Double, fixLon: Double): String {
+        // Snapped to a 0.1° (~11 km) grid so the box never reveals where the driver is, only the
+        // region — which is what the privacy policy and Play's Data safety form promise. The
+        // span still reaches at least 0.4° past the driver on every side.
+        val lat = Math.round(fixLat * 10) / 10.0
+        val lon = Math.round(fixLon * 10) / 10.0
+        val bbox = "%.4f,%.4f,%.4f,%.4f".format(Locale.US, lat - SPAN_DEG, lon - SPAN_DEG, lat + SPAN_DEG, lon + SPAN_DEG)
         // Most Indian surveillance nodes carry no zone or type tag at all — filtering on those
         // missed roughly 40% of them, including whole neighbourhoods. Proximity to a real road
         // is the honest test of whether a camera watches traffic, and it drops building CCTV.

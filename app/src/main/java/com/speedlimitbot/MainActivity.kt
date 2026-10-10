@@ -105,6 +105,14 @@ class MainActivity : ComponentActivity() {
         // Opening the app means the driver wants it watching. Nothing to tap.
         if (!Radar.running && hasLocation()) AlertService.start(this)
         UpdateCheck.maybeCheck(this)
+        Bubble.appVisible = true
+        Bubble.update(this)
+    }
+
+    override fun onStop() {
+        Bubble.appVisible = false
+        Bubble.update(this)
+        super.onStop()
     }
 
     private fun hasLocation() =
@@ -124,12 +132,28 @@ class MainActivity : ComponentActivity() {
             return
         }
 
-        // Background location can only be requested once the foreground one is granted.
+        // Background location can only be requested once the foreground one is granted. Play
+        // requires this disclosure, in the app and before the system prompt, with a real choice.
         if (checkSelfPermission(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
             != PackageManager.PERMISSION_GRANTED && !askedBackground
         ) {
             askedBackground = true
-            perms.launch(arrayOf(Manifest.permission.ACCESS_BACKGROUND_LOCATION))
+            android.app.AlertDialog.Builder(this)
+                .setTitle("Warn about cameras in the background")
+                .setMessage(
+                    "SpeedLimitBot collects location data to warn you about speed cameras " +
+                        "ahead, even when the app is closed or not in use — for example when " +
+                        "it starts by itself as your phone connects to the car.\n\n" +
+                        "Your position stays on this phone. To download cameras, only the " +
+                        "surrounding area (about 100 km across) is sent to OpenStreetMap.\n\n" +
+                        "On the next screen, choose \"Allow all the time\"."
+                )
+                .setPositiveButton("Continue") { _, _ ->
+                    perms.launch(arrayOf(Manifest.permission.ACCESS_BACKGROUND_LOCATION))
+                }
+                .setNegativeButton("Not now") { _, _ -> askPermissions() }
+                .setCancelable(false)
+                .show()
             return
         }
 

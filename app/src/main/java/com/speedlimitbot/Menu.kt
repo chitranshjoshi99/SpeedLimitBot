@@ -1,5 +1,8 @@
 package com.speedlimitbot
 
+import android.content.Intent
+import android.net.Uri
+import android.provider.Settings
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -108,7 +111,7 @@ fun Menu(onExport: () -> Unit) {
                         .background(Color(0xFF15181C), RoundedCornerShape(14.dp))
                         .padding(vertical = 8.dp)
                 ) {
-                    Item("CHECK FOR UPDATES") {
+                    if (SELF_UPDATE) Item("CHECK FOR UPDATES") {
                         open = false
                         say("Checking…")
                         UpdateCheck.check(ctx, ::say)
@@ -121,6 +124,36 @@ fun Menu(onExport: () -> Unit) {
                     Item("ADD CAMERA HERE") {
                         open = false
                         adding = true
+                    }
+                    Item("DRIVE WITH GOOGLE MAPS") {
+                        open = false
+                        if (!Bubble.allowed(ctx)) {
+                            say("Allow display over other apps, then tap again")
+                            runCatching {
+                                ctx.startActivity(Intent(
+                                    Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                                    Uri.parse("package:${ctx.packageName}")
+                                ))
+                            }
+                        } else {
+                            Bubble.setEnabled(ctx, true)
+                            if (!Radar.running) AlertService.start(ctx)
+                            val maps = ctx.packageManager.getLaunchIntentForPackage(GOOGLE_MAPS)
+                            if (maps == null) say("Bubble on · Google Maps is not installed")
+                                else ctx.startActivity(maps)
+                        }
+                    }
+                    if (Bubble.enabled(ctx)) Item("TURN OFF FLOATING BUBBLE") {
+                        open = false
+                        Bubble.setEnabled(ctx, false)
+                        say("Bubble off")
+                    }
+                    if (OsmAnd.installed(ctx)) Item("SHOW CAMERAS IN OSMAND") {
+                        open = false
+                        if (Radar.lat.isNaN()) say("No GPS fix yet") else {
+                            say("Sending to OsmAnd…")
+                            OsmAnd.push(ctx, Radar.lat, Radar.lon, ::say)
+                        }
                     }
                     Item("DOWNLOAD MY CAMERAS") {
                         open = false
@@ -147,6 +180,8 @@ fun Menu(onExport: () -> Unit) {
         }
     }
 }
+
+private const val GOOGLE_MAPS = "com.google.android.apps.maps"
 
 /** Height of the header row the hamburger and the status line sit in. */
 val HeaderHeight = 56.dp
