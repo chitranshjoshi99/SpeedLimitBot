@@ -193,8 +193,13 @@ class AlertService : android.app.Service(), LocationListener {
 
         Radar.speedKmh = (fix.speedMps * 3.6f).toInt()
 
+        // Stopped is not "no camera ahead". Standing down here forgot the camera at every red
+        // light, so stop-and-go traffic near one re-announced it each time the car moved off.
+        // Hold the warning silently; the next moving fix picks up where this left off.
         if (fix.heading.isNaN() || fix.speedMps < AlertEngine.MIN_MOVING_MPS) {
-            standDown(); return
+            setBeep(AlertEngine.Beep.NONE)
+            Radar.onChange?.invoke()
+            return
         }
 
         val hit = CameraDb.get(this)
@@ -206,7 +211,7 @@ class AlertService : android.app.Service(), LocationListener {
         Radar.distanceM = hit.distance.toInt()
         Radar.over = hit.limitKmh > 0 && Radar.speedKmh > hit.limitKmh + AlertEngine.OVER_TOLERANCE_KMH
 
-        val out = engine.update(hit.id, hit.distance, fix.speedMps, hit.limitKmh)
+        val out = engine.update(hit.id, hit.distance, fix.speedMps, hit.limitKmh, hit.lat, hit.lon, now)
         if (out.announce) {
             speak(out.limitKmh, hit.speedCamera, hit.guessed)
             Log.i(TAG, "  at %.6f,%.6f guessed=%b".format(hit.lat, hit.lon, hit.guessed))

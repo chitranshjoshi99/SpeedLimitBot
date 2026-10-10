@@ -47,6 +47,29 @@ class AlertEngineTest {
         assertTrue(e.update(2, 500.0, 20f, 60).announce)
     }
 
+    /** Two mapped cameras 10 m apart are one gantry: passing the first must not speak again. */
+    @Test fun neighbourOfAnnouncedCameraStaysQuiet() {
+        val e = AlertEngine()
+        assertTrue(e.update(1, 500.0, 20f, 80, 12.970000, 77.6, 1_000L).announce)
+        val next = e.update(2, 15.0, 20f, 80, 12.970090, 77.6, 25_000L)
+        assertFalse(next.announce)
+        assertEquals(AlertEngine.Beep.SLOW, next.beep)     // still live, still beeping
+    }
+
+    @Test fun cameraFurtherOnStillAnnounces() {
+        val e = AlertEngine()
+        assertTrue(e.update(1, 500.0, 20f, 80, 12.970000, 77.6, 1_000L).announce)
+        assertTrue(e.update(2, 900.0, 20f, 50, 12.978000, 77.6, 25_000L).announce)   // ~900 m on
+    }
+
+    /** Coming back past the same spot much later is a fresh approach. */
+    @Test fun siteIsForgottenAfterAWhile() {
+        val e = AlertEngine()
+        assertTrue(e.update(1, 500.0, 20f, 80, 12.970000, 77.6, 1_000L).announce)
+        e.clear()
+        assertTrue(e.update(2, 500.0, 20f, 50, 12.970090, 77.6, 600_000L).announce)
+    }
+
     /** 81 of the 522 shipped cameras have no known limit; they must still warn. */
     @Test fun unknownLimitWarnsButNeverCallsYouSpeeding() {
         val e = AlertEngine()

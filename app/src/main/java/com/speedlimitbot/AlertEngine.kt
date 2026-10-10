@@ -17,6 +17,9 @@ class AlertEngine {
 
     private var armedId = -1
     private var announced = false
+    private var siteLat = Double.NaN
+    private var siteLon = 0.0
+    private var siteAt = 0L
 
     /** Call when no camera is ahead any more. */
     fun clear() {
@@ -29,12 +32,22 @@ class AlertEngine {
      * @param distance metres to the camera
      * @param speedMps current ground speed
      * @param limitKmh posted limit at that camera, or 0 when the dataset does not know it
+     * @param lat      camera position, so a neighbouring camera of the same site stays quiet
+     * @param nowMs    monotonic clock
      * @return beep state plus whether to speak now
      */
-    fun update(id: Int, distance: Double, speedMps: Float, limitKmh: Int): Out {
+    fun update(
+        id: Int, distance: Double, speedMps: Float, limitKmh: Int,
+        lat: Double = Double.NaN, lon: Double = Double.NaN, nowMs: Long = 0L
+    ): Out {
         if (id != armedId) {
             armedId = id
-            announced = false
+            // OSM maps one gantry or junction as several cameras: over half the shipped set has
+            // a neighbour within 10 m. Passing one makes the next "nearest ahead", and speaking
+            // again right at the camera is noise. A camera next to the one just warned about
+            // inherits that warning; the site is forgotten a while after it stops being live.
+            announced = nowMs - siteAt < SITE_HOLD_MS &&
+                CameraDb.distance(siteLat, siteLon, lat, lon) < SITE_M
         }
         if (speedMps < MIN_MOVING_MPS) return Out(Beep.NONE, false, limitKmh)
 
@@ -44,6 +57,7 @@ class AlertEngine {
 
         val speak = !announced && eta <= ANNOUNCE_S
         if (speak) announced = true
+        if (announced) { siteLat = lat; siteLon = lon; siteAt = nowMs }
 
         // Latched on `announced`, not on eta: a fix that nudges the estimate back over 60 s
         // must not blink the beep off. Once a camera is announced it stays live until passed.
@@ -62,5 +76,7 @@ class AlertEngine {
         const val OVER_TOLERANCE_KMH = 3f
         const val MIN_MOVING_MPS = 2f
         const val RANGE_M = 3000.0
+        const val SITE_M = 60.0
+        const val SITE_HOLD_MS = 60_000L
     }
 }
