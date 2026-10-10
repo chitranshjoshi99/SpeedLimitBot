@@ -30,6 +30,9 @@ SpeedLimitBot should appear in the car launcher. What to check:
 - Opening it starts the radar — `adb shell dumpsys activity services com.speedlimitbot`
   shows `AlertService` foreground with `types=0x00000008`.
 - Closing the Auto session stops it.
+- The screen is a map with camera pins and a list; leave it open while moving (a real
+  drive, or a mock-location app) for well over five updates and confirm the host never shows its "too many steps" error and closes the app.
+  That would mean an update is not counting as a refresh.
 - With Google Maps navigating in the foreground, an approaching camera still produces the
   heads-up notification over the map. This is the one behaviour the docs do not state
   explicitly, so it is the thing actually worth testing on hardware.

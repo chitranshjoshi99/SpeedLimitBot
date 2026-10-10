@@ -40,9 +40,9 @@ Two ways to get it into a real car:
    Play Console app, add yourself as an internal tester, and install from the Play link.
    Internal testing installs count as a trusted source, and Play does no Android Auto review on
    the internal track, so it works in the car straight away. Open testing and production *are*
-   reviewed, and a navigation-category app must provide turn-by-turn directions
-   ([NF-1](https://developer.android.com/docs/quality-guidelines/car-app-quality)), which
-   this app does not — so a public Play listing with car support is blocked on that.
+   reviewed against the
+   [car app quality guidelines](https://developer.android.com/docs/quality-guidelines/car-app-quality)
+   for the declared category — POI, see [Android Auto](#android-auto).
 2. **Desktop Head Unit**, for development only — see `tools/dhu.md`. Sideloaded apps do work
    there, which is why this gap does not show up until a real car.
 
@@ -263,8 +263,7 @@ never shrinking, alerts unaffected while it ran on its background thread.
 
 Verified on device alongside it: the car heads-up notification posts with
 `importance=4 category=navigation`, which is the shape Android Auto requires to draw it over
-the map, and `RadarCarAppService` resolves for
-`androidx.car.app.CarAppService` + `androidx.car.app.category.NAVIGATION`.
+the map. (That run predates the move from the NAVIGATION to the POI category.)
 
 ### Verified on a car host
 
@@ -272,22 +271,20 @@ Run end to end on an Android Automotive OS emulator (`ro.build.characteristics=a
 which renders the same Car App Library templates that Android Auto projection drives:
 
 - Opening the car app starts the radar; closing the session stops it.
-- The whole window washes amber approaching a camera and red over the limit, and clears after.
 - The heads-up notification renders over the car UI: *"Speed camera · limit 80 — 707 m ahead"*.
 - Passing an unknown-limit camera presents the picker; choosing 80 wrote
   `25.629454,85.104061,80,S` and the next pass announced `limit=80` with the over-limit beep.
 - `CameraSync` pulled 4751 cameras into the car's cache while driving.
 
-Two host differences that the code now accounts for. `NavigationTemplate.setBackgroundColor`
-tints only the routing card, not the window, so the full-window wash is painted onto the app's
-map surface through `SurfaceCallback`. And the Automotive host does not render the
-NavigationTemplate action strip at all, so the limit picker is presented directly rather than
-hidden behind a button the driver may never see.
+That run used the old NavigationTemplate screen; the POI screen below has not been on a car
+host yet. One host difference carries over: the Automotive host did not render the action
+strip, so the limit picker is presented directly rather than hidden behind a button the driver
+may never see.
 
 **Still not verified:** Android Auto *projection* specifically, and the Bluetooth auto-start.
 The Desktop Head Unit needs the Android Auto phone app, which needs a Play Store image and a
 Google sign-in, and `ACL_CONNECTED` is a protected broadcast `adb` cannot fake. The templates,
-service lifecycle, surface and notification are all shared with projection, so what remains
+service lifecycle and notification are all shared with projection, so what remains
 untested there is the projection transport rather than the app's behaviour. See
 `tools/dhu.md`.
 
@@ -359,10 +356,20 @@ so the distance still counts down without a fresh alert each time.
 
 ## Android Auto
 
-The app is a Car App Library app in the `androidx.car.app.category.NAVIGATION` category.
+The app is a Car App Library app in the `androidx.car.app.category.POI` category. It was
+NAVIGATION, which was wrong twice over: the app gives no directions, and a navigation app
+takes Maps' place on the main screen. Cameras are points of interest, so POI is the honest fit
+— and no category gets a third-party app into Android Auto's small side cards anyway (those are
+reserved for the active navigation, media and call).
+
 `RadarCarAppService` is the entry point: Android Auto starting it is what launches the radar,
 which is a cleaner trigger than the Bluetooth heuristic — no battery-optimisation exemption
-needed. `RadarScreen` draws two rows, speed and camera ahead, and nothing else.
+needed. `RadarScreen` is a `PlaceListMapTemplate`: a host-drawn map with the nearest cameras
+as coloured pins (red speed, yellow traffic, labelled with the limit), a live "Now" row with
+speed and the camera ahead, and one row per camera. It redraws on every fix, so each update
+must count as a template *refresh* or the host closes the app after five: the header title,
+row count and row titles never change. Camera row titles are a bare `DistanceSpan`, which the
+refresh check ignores, and everything that changes sits in the row text.
 
 **There is no floating overlay on the car screen.** `SYSTEM_ALERT_WINDOW` does not project to
 Android Auto, and no API lets one app draw over another's map. What exists instead is the
@@ -375,8 +382,10 @@ Worth keeping in mind: the audio path never needed any of this. TTS and beeps us
 `USAGE_ASSISTANCE_NAVIGATION_GUIDANCE`, so they duck Maps and play through the car speakers
 whether or not the app is on screen.
 
-Shipping the navigation category on Play means meeting the
+Shipping on Play means meeting the
 [car app quality guidelines](https://developer.android.com/docs/quality-guidelines/car-app-quality).
+Google's POI examples are parking, charging and fuel; speed cameras are not named, so review
+may ask.
 
 ## Runtime setup on the phone
 
